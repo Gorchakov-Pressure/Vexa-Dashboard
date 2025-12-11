@@ -18,6 +18,7 @@ interface BotStatusIndicatorProps {
   platform: string;
   meetingId: string;
   createdAt?: string;
+  errorMessage?: string;
   onRetry?: () => void;
   onStopped?: () => void;
 }
@@ -38,7 +39,7 @@ const STATUS_ORDER: Record<string, number> = {
   failed: -1,
 };
 
-export function BotStatusIndicator({ status, platform, meetingId, createdAt, onRetry, onStopped }: BotStatusIndicatorProps) {
+export function BotStatusIndicator({ status, platform, meetingId, createdAt, errorMessage, onRetry, onStopped }: BotStatusIndicatorProps) {
   const [dots, setDots] = useState("");
   const [isTimedOut, setIsTimedOut] = useState(false);
   const [isBotRunning, setIsBotRunning] = useState<boolean | null>(null);
@@ -297,6 +298,24 @@ export function BotStatusIndicator({ status, platform, meetingId, createdAt, onR
             </div>
           </div>
         </div>
+
+        {/* Stop button - always visible at the bottom */}
+        <div className="mt-8 pt-6 border-t border-muted flex justify-center">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleStopBot}
+            disabled={isStopping}
+            className="text-muted-foreground hover:text-destructive gap-2"
+          >
+            {isStopping ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <StopCircle className="h-4 w-4" />
+            )}
+            Cancel and stop bot
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );
@@ -304,12 +323,42 @@ export function BotStatusIndicator({ status, platform, meetingId, createdAt, onR
 
 export function BotFailedIndicator({
   status,
+  errorMessage,
+  errorCode,
   onRetry
 }: {
   status: MeetingStatus;
+  errorMessage?: string;
+  errorCode?: string;
   onRetry?: () => void;
 }) {
   if (status !== "failed") return null;
+
+  // Determine error display
+  const getErrorTitle = () => {
+    if (errorCode) {
+      switch (errorCode.toLowerCase()) {
+        case "admission_timeout":
+        case "not_admitted":
+          return "Bot was not admitted";
+        case "meeting_ended":
+          return "Meeting has ended";
+        case "kicked":
+        case "removed":
+          return "Bot was removed from meeting";
+        case "connection_failed":
+          return "Connection failed";
+        default:
+          return "Transcription failed";
+      }
+    }
+    return "Transcription failed";
+  };
+
+  const getDefaultMessage = () => {
+    if (errorMessage) return errorMessage;
+    return "The bot was unable to join or complete the transcription. This can happen if the meeting ended or the bot was removed.";
+  };
 
   return (
     <Card className="border-destructive/50 bg-destructive/5">
@@ -319,11 +368,16 @@ export function BotFailedIndicator({
             <XCircle className="h-8 w-8 text-destructive" />
           </div>
           <h2 className="text-xl font-semibold mb-2 text-destructive">
-            Transcription Failed
+            {getErrorTitle()}
           </h2>
           <p className="text-sm text-muted-foreground max-w-sm mb-4">
-            The bot was unable to join or complete the transcription. This can happen if the meeting ended or the bot was removed.
+            {getDefaultMessage()}
           </p>
+          {errorCode && (
+            <p className="text-xs text-muted-foreground/60 font-mono mb-4">
+              Error: {errorCode}
+            </p>
+          )}
           {onRetry && (
             <button
               onClick={onRetry}

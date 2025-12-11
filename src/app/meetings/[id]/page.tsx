@@ -323,7 +323,11 @@ export default function MeetingDetailPage() {
 
           {/* Show failed indicator */}
           {currentMeeting.status === "failed" && (
-            <BotFailedIndicator status={currentMeeting.status} />
+            <BotFailedIndicator
+              status={currentMeeting.status}
+              errorMessage={currentMeeting.data?.error || currentMeeting.data?.failure_reason || currentMeeting.data?.status_message}
+              errorCode={currentMeeting.data?.error_code}
+            />
           )}
 
           {/* Show transcript viewer for active/completed */}

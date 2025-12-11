@@ -29,6 +29,11 @@ export interface MeetingData {
   notes?: string;
   participants?: string[];
   languages?: string[];
+  // Bot status details (may be populated by Vexa API)
+  error?: string;
+  error_code?: string;
+  status_message?: string;
+  failure_reason?: string;
   [key: string]: unknown;
 }
 

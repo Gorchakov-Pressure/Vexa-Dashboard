@@ -9,7 +9,6 @@ import {
   MessageSquare,
   Send,
   Loader2,
-  Sparkles,
   Trash2,
   StopCircle,
   XCircle,
@@ -232,22 +231,22 @@ export function AIChatPanel({ meeting, transcripts = [], trigger }: AIChatPanelP
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {trigger || (
-          <Button size="sm" className="gap-2">
-            <Sparkles className="h-4 w-4" />
+          <Button variant="outline" size="sm" className="gap-2">
+            <MessageSquare className="h-4 w-4" />
             Ask AI
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="max-w-4xl w-[95vw] h-[85vh] flex flex-col p-0 gap-0">
+      <DialogContent className="max-w-5xl w-[95vw] h-[90vh] flex flex-col p-0 gap-0">
         {/* Header */}
         <DialogHeader className="px-6 py-4 border-b shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
-                <Sparkles className="h-5 w-5 text-white" />
+              <div className="h-9 w-9 rounded-lg bg-muted flex items-center justify-center">
+                <Bot className="h-5 w-5 text-foreground" />
               </div>
               <div>
-                <DialogTitle className="text-lg font-semibold">AI Assistant</DialogTitle>
+                <DialogTitle className="text-base font-medium">AI Assistant</DialogTitle>
                 {meeting && (
                   <p className="text-sm text-muted-foreground">
                     {meeting.data?.name || meeting.data?.title || meeting.platform_specific_id}
@@ -311,26 +310,25 @@ export function AIChatPanel({ meeting, transcripts = [], trigger }: AIChatPanelP
                 </p>
               </div>
             ) : messages.length === 0 && !error ? (
-              <div className="flex flex-col items-center justify-center text-center py-8">
-                <div className="h-20 w-20 rounded-2xl bg-gradient-to-br from-violet-500/10 to-purple-600/10 flex items-center justify-center mb-6">
-                  <MessageSquare className="h-10 w-10 text-violet-500" />
+              <div className="flex flex-col items-center justify-center text-center py-12">
+                <div className="h-16 w-16 rounded-full bg-muted flex items-center justify-center mb-6">
+                  <MessageSquare className="h-8 w-8 text-muted-foreground" />
                 </div>
-                <h3 className="text-xl font-semibold mb-2">Ask anything about your meeting</h3>
-                <p className="text-muted-foreground mb-8 max-w-md">
+                <h3 className="text-lg font-medium mb-2">Ask anything about your meeting</h3>
+                <p className="text-sm text-muted-foreground mb-8 max-w-md">
                   {transcripts.length > 0
-                    ? `${transcripts.length} transcript segments loaded and ready to analyze`
-                    : "No transcript loaded. Start a meeting to get AI insights."}
+                    ? `${transcripts.length} transcript segments loaded`
+                    : "No transcript loaded yet"}
                 </p>
                 {transcripts.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 w-full max-w-3xl">
                     {suggestedPrompts.map((prompt) => (
                       <button
                         key={prompt}
                         onClick={() => handleSuggestedPrompt(prompt)}
                         disabled={isLoading}
-                        className="text-left text-sm px-4 py-3 rounded-xl border bg-card hover:bg-accent hover:border-accent transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="text-left text-sm px-4 py-3 rounded-lg border bg-background hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        <span className="text-muted-foreground mr-2">→</span>
                         {prompt}
                       </button>
                     ))}
@@ -338,34 +336,34 @@ export function AIChatPanel({ meeting, transcripts = [], trigger }: AIChatPanelP
                 )}
               </div>
             ) : (
-              <div className="space-y-6 max-w-3xl mx-auto">
+              <div className="space-y-6 max-w-4xl mx-auto">
                 {messages.map((message) => (
-                  <div key={message.id} className="flex gap-4">
+                  <div key={message.id} className="flex gap-3">
                     {/* Avatar */}
                     <div className={cn(
-                      "h-9 w-9 rounded-lg flex items-center justify-center shrink-0",
+                      "h-8 w-8 rounded-full flex items-center justify-center shrink-0",
                       message.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-gradient-to-br from-violet-500 to-purple-600 text-white"
+                        ? "bg-foreground text-background"
+                        : "bg-muted text-foreground"
                     )}>
                       {message.role === "user" ? (
-                        <User className="h-5 w-5" />
+                        <User className="h-4 w-4" />
                       ) : (
-                        <Bot className="h-5 w-5" />
+                        <Bot className="h-4 w-4" />
                       )}
                     </div>
 
                     {/* Message Content */}
-                    <div className="flex-1 min-w-0 pt-1">
-                      <p className="text-sm font-medium mb-2 text-muted-foreground">
-                        {message.role === "user" ? "You" : "AI Assistant"}
+                    <div className="flex-1 min-w-0 pt-0.5">
+                      <p className="text-xs font-medium mb-1.5 text-muted-foreground">
+                        {message.role === "user" ? "You" : "Assistant"}
                       </p>
                       {message.role === "user" ? (
-                        <p className="text-foreground whitespace-pre-wrap">
+                        <p className="text-sm text-foreground whitespace-pre-wrap">
                           {getMessageContent(message)}
                         </p>
                       ) : (
-                        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-muted prose-pre:border prose-code:text-violet-600 dark:prose-code:text-violet-400 prose-headings:font-semibold prose-ul:my-2 prose-li:my-0">
+                        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-relaxed prose-pre:bg-muted prose-pre:border prose-headings:font-semibold prose-ul:my-2 prose-li:my-0">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {getMessageContent(message)}
                           </ReactMarkdown>
@@ -377,14 +375,14 @@ export function AIChatPanel({ meeting, transcripts = [], trigger }: AIChatPanelP
 
                 {/* Loading indicator */}
                 {isLoading && (
-                  <div className="flex gap-4">
-                    <div className="h-9 w-9 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shrink-0">
-                      <Bot className="h-5 w-5 text-white" />
+                  <div className="flex gap-3">
+                    <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
+                      <Bot className="h-4 w-4 text-foreground" />
                     </div>
-                    <div className="flex-1 pt-1">
-                      <p className="text-sm font-medium mb-2 text-muted-foreground">AI Assistant</p>
+                    <div className="flex-1 pt-0.5">
+                      <p className="text-xs font-medium mb-1.5 text-muted-foreground">Assistant</p>
                       <div className="flex items-center gap-2 text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Loader2 className="h-3 w-3 animate-spin" />
                         <span className="text-sm">Thinking...</span>
                       </div>
                     </div>
@@ -397,37 +395,37 @@ export function AIChatPanel({ meeting, transcripts = [], trigger }: AIChatPanelP
 
         {/* Input Area */}
         {isConfigured && (
-          <div className="px-6 py-4 border-t bg-muted/30 shrink-0">
-            <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
-              <div className="flex gap-3">
+          <div className="px-6 py-4 border-t shrink-0">
+            <form onSubmit={handleSubmit} className="max-w-4xl mx-auto">
+              <div className="flex gap-2">
                 <Textarea
                   ref={textareaRef}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="Ask a question about your meeting..."
-                  className="min-h-[52px] max-h-40 resize-none bg-background"
+                  className="min-h-[44px] max-h-32 resize-none"
                   rows={1}
                   disabled={isLoading}
                 />
                 {isLoading ? (
                   <Button
                     type="button"
-                    size="lg"
-                    variant="destructive"
+                    size="icon"
+                    variant="outline"
                     onClick={stop}
-                    className="shrink-0 px-4"
+                    className="shrink-0 h-11 w-11"
                   >
-                    <StopCircle className="h-5 w-5" />
+                    <StopCircle className="h-4 w-4" />
                   </Button>
                 ) : (
                   <Button
                     type="submit"
-                    size="lg"
+                    size="icon"
                     disabled={!input.trim()}
-                    className="shrink-0 px-4 bg-gradient-to-r from-violet-500 to-purple-600 hover:from-violet-600 hover:to-purple-700"
+                    className="shrink-0 h-11 w-11"
                   >
-                    <Send className="h-5 w-5" />
+                    <Send className="h-4 w-4" />
                   </Button>
                 )}
               </div>
