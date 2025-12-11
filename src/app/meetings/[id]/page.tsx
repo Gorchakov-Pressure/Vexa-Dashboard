@@ -244,7 +244,7 @@ export default function MeetingDetailPage() {
 
         {/* Sidebar - sticky on desktop */}
         <div className="order-1 lg:order-2">
-          <div className="lg:sticky lg:top-20 space-y-6">
+          <div className="lg:sticky lg:top-6 space-y-6">
           {/* Meeting Info */}
           <Card className="animate-fade-in">
             <CardHeader>

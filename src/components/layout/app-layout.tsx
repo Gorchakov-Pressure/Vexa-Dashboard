@@ -30,11 +30,11 @@ export function AppLayout({ children }: AppLayoutProps) {
   // For authenticated routes, wrap with AuthProvider and full layout
   return (
     <AuthProvider>
-      <div className="min-h-screen bg-background">
+      <div className="h-screen flex flex-col bg-background overflow-hidden">
         <Header onMenuClick={() => setSidebarOpen(true)} />
-        <div className="flex">
+        <div className="flex flex-1 overflow-hidden">
           <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-          <main className="flex-1 p-4 md:p-6 overflow-auto">
+          <main className="flex-1 overflow-auto p-4 md:p-6">
             {children}
           </main>
         </div>
