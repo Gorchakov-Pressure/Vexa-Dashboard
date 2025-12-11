@@ -23,6 +23,7 @@ import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { ErrorState } from "@/components/ui/error-state";
 import { TranscriptViewer } from "@/components/transcript/transcript-viewer";
+import { BotStatusIndicator, BotFailedIndicator } from "@/components/meetings/bot-status-indicator";
 import { useMeetingsStore } from "@/stores/meetings-store";
 import { useMeetingTitlesStore } from "@/stores/meeting-titles-store";
 import { PLATFORM_CONFIG, MEETING_STATUS_CONFIG } from "@/types/vexa";
@@ -57,6 +58,22 @@ export default function MeetingDetailPage() {
       clearCurrentMeeting();
     };
   }, [meetingId, fetchMeeting, clearCurrentMeeting]);
+
+  // Auto-refresh for early states (requested, joining, awaiting_admission)
+  useEffect(() => {
+    const isEarlyState =
+      currentMeeting?.status === "requested" ||
+      currentMeeting?.status === "joining" ||
+      currentMeeting?.status === "awaiting_admission";
+
+    if (!isEarlyState || !meetingId) return;
+
+    const interval = setInterval(() => {
+      fetchMeeting(meetingId);
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(interval);
+  }, [currentMeeting?.status, meetingId, fetchMeeting]);
 
   // Fetch transcripts when meeting is loaded
   useEffect(() => {
@@ -195,14 +212,34 @@ export default function MeetingDetailPage() {
 
       {/* Main content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Transcript */}
+        {/* Transcript or Status Indicator */}
         <div className="lg:col-span-2 order-2 lg:order-1">
-          <TranscriptViewer
-            meeting={currentMeeting}
-            segments={transcripts}
-            isLoading={isLoadingTranscripts}
-            isLive={currentMeeting.status === "active"}
-          />
+          {/* Show bot status for early states */}
+          {(currentMeeting.status === "requested" ||
+            currentMeeting.status === "joining" ||
+            currentMeeting.status === "awaiting_admission") && (
+            <BotStatusIndicator
+              status={currentMeeting.status}
+              platform={currentMeeting.platform}
+              meetingId={currentMeeting.platform_specific_id}
+            />
+          )}
+
+          {/* Show failed indicator */}
+          {currentMeeting.status === "failed" && (
+            <BotFailedIndicator status={currentMeeting.status} />
+          )}
+
+          {/* Show transcript viewer for active/completed */}
+          {(currentMeeting.status === "active" ||
+            currentMeeting.status === "completed") && (
+            <TranscriptViewer
+              meeting={currentMeeting}
+              segments={transcripts}
+              isLoading={isLoadingTranscripts}
+              isLive={currentMeeting.status === "active"}
+            />
+          )}
         </div>
 
         {/* Sidebar - sticky on desktop */}
