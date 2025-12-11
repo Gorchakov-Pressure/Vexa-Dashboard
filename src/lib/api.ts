@@ -194,6 +194,26 @@ export const vexaAPI = {
     }
   },
 
+  // Update meeting data (title, notes, participants, languages)
+  async updateMeetingData(
+    platform: Platform,
+    nativeId: string,
+    data: {
+      name?: string;
+      notes?: string;
+      participants?: string[];
+      languages?: string[];
+    }
+  ): Promise<Meeting> {
+    const response = await fetch(`/api/vexa/meetings/${platform}/${nativeId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data }),
+    });
+    const raw = await handleResponse<RawMeeting>(response);
+    return mapMeeting(raw);
+  },
+
   // Connection test
   async testConnection(): Promise<{ success: boolean; error?: string }> {
     try {

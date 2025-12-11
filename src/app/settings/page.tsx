@@ -10,8 +10,9 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { vexaAPI } from "@/lib/api";
+import { AdminGuard } from "@/components/admin/admin-guard";
 
-export default function SettingsPage() {
+function SettingsContent() {
   const [isTesting, setIsTesting] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState<"unknown" | "connected" | "error">("unknown");
   const [connectionError, setConnectionError] = useState<string | null>(null);
@@ -213,5 +214,13 @@ NEXT_PUBLIC_VEXA_WS_URL=ws://localhost:18056/ws`}
         </Card>
       </div>
     </div>
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <AdminGuard>
+      <SettingsContent />
+    </AdminGuard>
   );
 }

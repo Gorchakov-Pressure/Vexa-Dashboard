@@ -30,12 +30,12 @@ interface SidebarProps {
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Meetings", href: "/meetings", icon: Video },
-  { name: "Settings", href: "/settings", icon: Settings },
 ];
 
 const adminNavigation = [
   { name: "Users", href: "/admin/users", icon: Users },
   { name: "Bots", href: "/admin/bots", icon: Bot },
+  { name: "Settings", href: "/settings", icon: Settings },
 ];
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {

@@ -2,6 +2,13 @@ import { create } from "zustand";
 import type { Meeting, TranscriptSegment, Platform, MeetingStatus } from "@/types/vexa";
 import { vexaAPI } from "@/lib/api";
 
+interface MeetingDataUpdate {
+  name?: string;
+  notes?: string;
+  participants?: string[];
+  languages?: string[];
+}
+
 interface MeetingsState {
   // Data
   meetings: Meeting[];
@@ -12,6 +19,7 @@ interface MeetingsState {
   isLoadingMeetings: boolean;
   isLoadingMeeting: boolean;
   isLoadingTranscripts: boolean;
+  isUpdatingMeeting: boolean;
 
   // Error states
   error: string | null;
@@ -21,6 +29,7 @@ interface MeetingsState {
   fetchMeeting: (id: string, options?: { silent?: boolean }) => Promise<void>;
   refreshMeeting: (id: string) => Promise<void>;
   fetchTranscripts: (platform: Platform, nativeId: string) => Promise<void>;
+  updateMeetingData: (platform: Platform, nativeId: string, data: MeetingDataUpdate) => Promise<void>;
   setCurrentMeeting: (meeting: Meeting | null) => void;
   clearCurrentMeeting: () => void;
 
@@ -41,6 +50,7 @@ export const useMeetingsStore = create<MeetingsState>((set, get) => ({
   isLoadingMeetings: false,
   isLoadingMeeting: false,
   isLoadingTranscripts: false,
+  isUpdatingMeeting: false,
   error: null,
 
   // Fetch all meetings
@@ -136,6 +146,29 @@ export const useMeetingsStore = create<MeetingsState>((set, get) => ({
         error: (error as Error).message,
         isLoadingTranscripts: false
       });
+    }
+  },
+
+  // Update meeting data (title, notes, etc.)
+  updateMeetingData: async (platform: Platform, nativeId: string, data: MeetingDataUpdate) => {
+    set({ isUpdatingMeeting: true });
+    try {
+      const updatedMeeting = await vexaAPI.updateMeetingData(platform, nativeId, data);
+
+      // Update current meeting if it matches
+      const { currentMeeting, meetings } = get();
+      if (currentMeeting?.platform_specific_id === nativeId) {
+        set({ currentMeeting: updatedMeeting });
+      }
+
+      // Update in meetings list
+      const updatedMeetings = meetings.map((m) =>
+        m.platform_specific_id === nativeId ? updatedMeeting : m
+      );
+      set({ meetings: updatedMeetings, isUpdatingMeeting: false });
+    } catch (error) {
+      set({ isUpdatingMeeting: false });
+      throw error; // Re-throw so UI can handle it
     }
   },
 

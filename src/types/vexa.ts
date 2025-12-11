@@ -24,9 +24,11 @@ export interface Meeting {
 }
 
 export interface MeetingData {
+  name?: string;
+  title?: string;
+  notes?: string;
   participants?: string[];
   languages?: string[];
-  title?: string;
   [key: string]: unknown;
 }
 

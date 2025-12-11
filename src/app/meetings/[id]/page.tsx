@@ -15,6 +15,8 @@ import {
   Check,
   X,
   Sparkles,
+  Loader2,
+  FileText,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -22,16 +24,17 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ErrorState } from "@/components/ui/error-state";
 import { TranscriptViewer } from "@/components/transcript/transcript-viewer";
 import { BotStatusIndicator, BotFailedIndicator } from "@/components/meetings/bot-status-indicator";
 import { AIChatPanel } from "@/components/ai";
 import { useMeetingsStore } from "@/stores/meetings-store";
-import { useMeetingTitlesStore } from "@/stores/meeting-titles-store";
 import { useLiveTranscripts } from "@/hooks/use-live-transcripts";
 import { PLATFORM_CONFIG, MEETING_STATUS_CONFIG } from "@/types/vexa";
 import type { MeetingStatus } from "@/types/vexa";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 export default function MeetingDetailPage() {
   const params = useParams();
@@ -43,16 +46,24 @@ export default function MeetingDetailPage() {
     transcripts,
     isLoadingMeeting,
     isLoadingTranscripts,
+    isUpdatingMeeting,
     error,
     fetchMeeting,
     refreshMeeting,
     fetchTranscripts,
+    updateMeetingData,
     clearCurrentMeeting,
   } = useMeetingsStore();
 
-  const { setTitle, getTitle } = useMeetingTitlesStore();
+  // Title editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState("");
+  const [isSavingTitle, setIsSavingTitle] = useState(false);
+
+  // Notes editing state
+  const [isEditingNotes, setIsEditingNotes] = useState(false);
+  const [editedNotes, setEditedNotes] = useState("");
+  const [isSavingNotes, setIsSavingNotes] = useState(false);
 
   // Track if initial load is complete to prevent animation replays
   const hasLoadedRef = useRef(false);
@@ -185,10 +196,21 @@ export default function MeetingDetailPage() {
                   className="text-2xl font-bold h-10 max-w-md"
                   placeholder="Meeting title..."
                   autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      setTitle(meetingId, editedTitle);
-                      setIsEditingTitle(false);
+                  disabled={isSavingTitle}
+                  onKeyDown={async (e) => {
+                    if (e.key === "Enter" && editedTitle.trim()) {
+                      setIsSavingTitle(true);
+                      try {
+                        await updateMeetingData(currentMeeting.platform, currentMeeting.platform_specific_id, {
+                          name: editedTitle.trim(),
+                        });
+                        setIsEditingTitle(false);
+                        toast.success("Title updated");
+                      } catch (err) {
+                        toast.error("Failed to update title");
+                      } finally {
+                        setIsSavingTitle(false);
+                      }
                     } else if (e.key === "Escape") {
                       setIsEditingTitle(false);
                     }
@@ -198,17 +220,30 @@ export default function MeetingDetailPage() {
                   size="icon"
                   variant="ghost"
                   className="h-8 w-8 text-green-600"
-                  onClick={() => {
-                    setTitle(meetingId, editedTitle);
-                    setIsEditingTitle(false);
+                  disabled={isSavingTitle || !editedTitle.trim()}
+                  onClick={async () => {
+                    if (!editedTitle.trim()) return;
+                    setIsSavingTitle(true);
+                    try {
+                      await updateMeetingData(currentMeeting.platform, currentMeeting.platform_specific_id, {
+                        name: editedTitle.trim(),
+                      });
+                      setIsEditingTitle(false);
+                      toast.success("Title updated");
+                    } catch (err) {
+                      toast.error("Failed to update title");
+                    } finally {
+                      setIsSavingTitle(false);
+                    }
                   }}
                 >
-                  <Check className="h-4 w-4" />
+                  {isSavingTitle ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                 </Button>
                 <Button
                   size="icon"
                   variant="ghost"
                   className="h-8 w-8 text-muted-foreground"
+                  disabled={isSavingTitle}
                   onClick={() => setIsEditingTitle(false)}
                 >
                   <X className="h-4 w-4" />
@@ -217,14 +252,14 @@ export default function MeetingDetailPage() {
             ) : (
               <div className="flex items-center gap-2 group">
                 <h1 className="text-2xl font-bold tracking-tight truncate">
-                  {getTitle(meetingId) || currentMeeting.data?.title || currentMeeting.platform_specific_id}
+                  {currentMeeting.data?.name || currentMeeting.data?.title || currentMeeting.platform_specific_id}
                 </h1>
                 <Button
                   size="icon"
                   variant="ghost"
                   className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
                   onClick={() => {
-                    setEditedTitle(getTitle(meetingId) || currentMeeting.data?.title || "");
+                    setEditedTitle(currentMeeting.data?.name || currentMeeting.data?.title || "");
                     setIsEditingTitle(true);
                   }}
                 >
@@ -425,6 +460,91 @@ export default function MeetingDetailPage() {
                   )}
                 </span>
               </div>
+            </CardContent>
+          </Card>
+
+          {/* Notes */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Notes
+                </CardTitle>
+                {!isEditingNotes && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-muted-foreground"
+                    onClick={() => {
+                      setEditedNotes(currentMeeting.data?.notes || "");
+                      setIsEditingNotes(true);
+                    }}
+                  >
+                    <Pencil className="h-3.5 w-3.5 mr-1" />
+                    {currentMeeting.data?.notes ? "Edit" : "Add"}
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {isEditingNotes ? (
+                <div className="space-y-3">
+                  <Textarea
+                    value={editedNotes}
+                    onChange={(e) => setEditedNotes(e.target.value)}
+                    placeholder="Add notes about this meeting..."
+                    className="min-h-[120px] resize-none"
+                    disabled={isSavingNotes}
+                    autoFocus
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={isSavingNotes}
+                      onClick={() => setIsEditingNotes(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      size="sm"
+                      disabled={isSavingNotes}
+                      onClick={async () => {
+                        setIsSavingNotes(true);
+                        try {
+                          await updateMeetingData(currentMeeting.platform, currentMeeting.platform_specific_id, {
+                            notes: editedNotes.trim(),
+                          });
+                          setIsEditingNotes(false);
+                          toast.success("Notes saved");
+                        } catch (err) {
+                          toast.error("Failed to save notes");
+                        } finally {
+                          setIsSavingNotes(false);
+                        }
+                      }}
+                    >
+                      {isSavingNotes ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        "Save"
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              ) : currentMeeting.data?.notes ? (
+                <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                  {currentMeeting.data.notes}
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground italic">
+                  No notes yet. Click "Add" to add notes.
+                </p>
+              )}
             </CardContent>
           </Card>
           </div>
