@@ -17,6 +17,7 @@ import {
   Sparkles,
   Loader2,
   FileText,
+  StopCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,7 @@ import { useLiveTranscripts } from "@/hooks/use-live-transcripts";
 import { PLATFORM_CONFIG, MEETING_STATUS_CONFIG } from "@/types/vexa";
 import type { MeetingStatus } from "@/types/vexa";
 import { cn } from "@/lib/utils";
+import { vexaAPI } from "@/lib/api";
 import { toast } from "sonner";
 
 export default function MeetingDetailPage() {
@@ -65,6 +67,9 @@ export default function MeetingDetailPage() {
   const [editedNotes, setEditedNotes] = useState("");
   const [isSavingNotes, setIsSavingNotes] = useState(false);
 
+  // Bot control state
+  const [isStoppingBot, setIsStoppingBot] = useState(false);
+
   // Track if initial load is complete to prevent animation replays
   const hasLoadedRef = useRef(false);
 
@@ -75,6 +80,25 @@ export default function MeetingDetailPage() {
       fetchMeeting(meetingId);
     }
   }, [fetchMeeting, meetingId]);
+
+  // Handle stopping the bot
+  const handleStopBot = useCallback(async () => {
+    if (!currentMeeting) return;
+    setIsStoppingBot(true);
+    try {
+      await vexaAPI.stopBot(currentMeeting.platform, currentMeeting.platform_specific_id);
+      toast.success("Bot stopped", {
+        description: "The transcription has been stopped.",
+      });
+      fetchMeeting(meetingId);
+    } catch (error) {
+      toast.error("Failed to stop bot", {
+        description: (error as Error).message,
+      });
+    } finally {
+      setIsStoppingBot(false);
+    }
+  }, [currentMeeting, fetchMeeting, meetingId]);
 
   // Live transcripts via WebSocket (only when meeting is active)
   const {
@@ -279,19 +303,38 @@ export default function MeetingDetailPage() {
               </Badge>
             </div>
           </div>
-          {/* AI Chat Button */}
-          {(currentMeeting.status === "active" || currentMeeting.status === "completed") && transcripts.length > 0 && (
-            <AIChatPanel
-              meeting={currentMeeting}
-              transcripts={transcripts}
-              trigger={
-                <Button className="gap-2 shrink-0">
-                  <Sparkles className="h-4 w-4" />
-                  Ask AI
-                </Button>
-              }
-            />
-          )}
+          {/* Action Buttons */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Stop Bot Button - only when active */}
+            {currentMeeting.status === "active" && (
+              <Button
+                variant="outline"
+                className="gap-2 text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={handleStopBot}
+                disabled={isStoppingBot}
+              >
+                {isStoppingBot ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <StopCircle className="h-4 w-4" />
+                )}
+                Stop
+              </Button>
+            )}
+            {/* AI Chat Button */}
+            {(currentMeeting.status === "active" || currentMeeting.status === "completed") && transcripts.length > 0 && (
+              <AIChatPanel
+                meeting={currentMeeting}
+                transcripts={transcripts}
+                trigger={
+                  <Button className="gap-2">
+                    <Sparkles className="h-4 w-4" />
+                    Ask AI
+                  </Button>
+                }
+              />
+            )}
+          </div>
         </div>
       </div>
 
