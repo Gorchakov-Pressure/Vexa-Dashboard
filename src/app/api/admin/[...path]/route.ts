@@ -1,15 +1,56 @@
 import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
+
+const ADMIN_COOKIE_NAME = "vexa-admin-session";
+const COOKIE_MAX_AGE = 60 * 60 * 24; // 24 hours
+
+/**
+ * Verify admin session from cookie
+ */
+async function verifyAdminSession(): Promise<boolean> {
+  try {
+    const cookieStore = await cookies();
+    const sessionCookie = cookieStore.get(ADMIN_COOKIE_NAME);
+
+    if (!sessionCookie) {
+      return false;
+    }
+
+    const sessionData = JSON.parse(
+      Buffer.from(sessionCookie.value, "base64").toString()
+    );
+
+    // Check if session is expired (24 hours)
+    const sessionAge = Date.now() - sessionData.timestamp;
+    if (sessionAge > COOKIE_MAX_AGE * 1000) {
+      return false;
+    }
+
+    return sessionData.authenticated === true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Admin API Proxy
  * Forwards requests to Vexa Admin API with X-Admin-API-Key header
+ * SECURITY: Requires valid admin session cookie
  */
-
 async function proxyRequest(
   request: NextRequest,
   params: Promise<{ path: string[] }>,
   method: string
 ): Promise<NextResponse> {
+  // SECURITY: Verify admin session before proxying
+  const isAdminAuthenticated = await verifyAdminSession();
+  if (!isAdminAuthenticated) {
+    return NextResponse.json(
+      { error: "Admin authentication required", code: "ADMIN_AUTH_REQUIRED" },
+      { status: 401 }
+    );
+  }
+
   const VEXA_ADMIN_API_URL = process.env.VEXA_ADMIN_API_URL || process.env.VEXA_API_URL || "http://localhost:18056";
   const VEXA_ADMIN_API_KEY = process.env.VEXA_ADMIN_API_KEY || "";
 
