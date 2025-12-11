@@ -102,23 +102,62 @@ export const vexaAPI = {
     platform: Platform,
     nativeId: string
   ): Promise<TranscriptSegment[]> {
+    const result = await this.getMeetingWithTranscripts(platform, nativeId);
+    return result.segments;
+  },
+
+  // Get meeting info with transcripts - returns full meeting data from transcripts endpoint
+  async getMeetingWithTranscripts(
+    platform: Platform,
+    nativeId: string
+  ): Promise<{ meeting: Meeting; segments: TranscriptSegment[] }> {
     const response = await fetch(`/api/vexa/transcripts/${platform}/${nativeId}`);
     interface RawSegment {
       start: number;
       end: number;
       text: string;
-      speaker: string;
+      speaker: string | null;
       language: string;
       absolute_start_time: string;
       absolute_end_time: string;
       created_at: string;
     }
     interface RawTranscriptResponse {
+      id: number;
+      platform: Platform;
+      native_meeting_id: string;
+      constructed_meeting_url?: string;
+      status: string;
+      start_time: string | null;
+      end_time: string | null;
+      data?: Record<string, unknown>;
+      error?: string;
+      error_code?: string;
+      failure_reason?: string;
       segments: RawSegment[];
     }
     const data = await handleResponse<RawTranscriptResponse>(response);
-    // Map API fields to our types (start -> start_time, end -> end_time)
-    return (data.segments || []).map((seg, index) => ({
+
+    // Map to Meeting type
+    const meeting: Meeting = {
+      id: data.id.toString(),
+      platform: data.platform,
+      platform_specific_id: data.native_meeting_id,
+      status: data.status as Meeting["status"],
+      start_time: data.start_time,
+      end_time: data.end_time,
+      bot_container_id: null,
+      data: {
+        ...(data.data || {}),
+        error: data.error,
+        error_code: data.error_code,
+        failure_reason: data.failure_reason,
+      } as Meeting["data"],
+      created_at: data.start_time || "",
+    };
+
+    // Map segments
+    const segments: TranscriptSegment[] = (data.segments || []).map((seg, index) => ({
       id: `${index}`,
       meeting_id: nativeId,
       start_time: seg.start,
@@ -126,11 +165,13 @@ export const vexaAPI = {
       absolute_start_time: seg.absolute_start_time,
       absolute_end_time: seg.absolute_end_time,
       text: seg.text,
-      speaker: seg.speaker,
+      speaker: seg.speaker || "Unknown",
       language: seg.language,
       session_uid: "",
       created_at: seg.created_at,
     }));
+
+    return { meeting, segments };
   },
 
   // Bots
