@@ -199,40 +199,6 @@ export function TranscriptViewer({
                 Live
               </Badge>
             )}
-            {/* WebSocket connection indicator */}
-            {isLive && (
-              <div className="flex items-center gap-1.5">
-                {wsConnecting ? (
-                  <Badge variant="outline" className="gap-1 text-yellow-600 border-yellow-300 bg-yellow-50">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Connecting...
-                  </Badge>
-                ) : wsConnected ? (
-                  <Badge variant="outline" className="gap-1 text-green-600 border-green-300 bg-green-50">
-                    <Wifi className="h-3 w-3" />
-                    Connected
-                  </Badge>
-                ) : wsError ? (
-                  <Badge variant="outline" className="gap-1 text-red-600 border-red-300 bg-red-50">
-                    <AlertCircle className="h-3 w-3" />
-                    {wsReconnectAttempts && wsReconnectAttempts > 0
-                      ? `Reconnecting (${wsReconnectAttempts})...`
-                      : "Polling"}
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="gap-1 text-gray-600 border-gray-300 bg-gray-50">
-                    <WifiOff className="h-3 w-3" />
-                    Disconnected
-                  </Badge>
-                )}
-              </div>
-            )}
-            {segments.length > 0 && (
-              <Badge variant="secondary" className="font-normal">
-                <MessageSquare className="h-3 w-3 mr-1" />
-                {segments.length} segments
-              </Badge>
-            )}
           </div>
 
           {/* Export */}

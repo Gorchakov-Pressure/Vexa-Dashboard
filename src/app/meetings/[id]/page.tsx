@@ -274,12 +274,6 @@ export default function MeetingDetailPage() {
               </p>
             )}
             <div className="flex flex-wrap items-center gap-2 mt-2">
-              <Badge
-                variant="outline"
-                className={cn(platformConfig.bgColor, platformConfig.textColor)}
-              >
-                {platformConfig.name}
-              </Badge>
               <Badge className={cn(statusConfig.bgColor, statusConfig.color)}>
                 {statusConfig.label}
               </Badge>
@@ -359,11 +353,13 @@ export default function MeetingDetailPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Meeting ID */}
+              {/* Platform & Meeting ID */}
               <div className="flex items-center gap-3">
-                <Video className="h-4 w-4 text-muted-foreground" />
+                <div className={cn("h-8 w-8 rounded-lg flex items-center justify-center", platformConfig.bgColor)}>
+                  <Video className={cn("h-4 w-4", platformConfig.textColor)} />
+                </div>
                 <div>
-                  <p className="text-sm font-medium">Meeting ID</p>
+                  <p className="text-sm font-medium">{platformConfig.name}</p>
                   <p className="text-sm text-muted-foreground font-mono">
                     {currentMeeting.platform_specific_id}
                   </p>
