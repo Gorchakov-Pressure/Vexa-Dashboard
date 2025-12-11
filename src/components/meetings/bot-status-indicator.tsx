@@ -179,7 +179,8 @@ export function BotStatusIndicator({ status, platform, meetingId, createdAt, onR
       return <Check className="h-5 w-5 text-green-500" />;
     }
     if (!isActive) {
-      return <div className="h-2 w-2 rounded-full bg-muted-foreground/30" />;
+      // Small dot for inactive steps - the parent container already has bg-muted which is opaque
+      return <div className="h-2.5 w-2.5 rounded-full bg-muted-foreground/40" />;
     }
     switch (stepStatus) {
       case "requested":
@@ -225,7 +226,8 @@ export function BotStatusIndicator({ status, platform, meetingId, createdAt, onR
           </div>
 
           <h2 className="text-xl font-semibold mb-2">
-            {getStatusMessage()}{dots}
+            {getStatusMessage()}
+            <span className="inline-block w-6 text-left">{dots}</span>
           </h2>
 
           <p className="text-sm text-muted-foreground max-w-sm">
@@ -261,14 +263,19 @@ export function BotStatusIndicator({ status, platform, meetingId, createdAt, onR
                       !isCompleted && !isActive && "opacity-40"
                     )}
                   >
-                    {/* Step icon */}
-                    <div className={cn(
-                      "flex-shrink-0 h-11 w-11 rounded-full flex items-center justify-center border-2 transition-all duration-300",
-                      isCompleted && "bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800",
-                      isActive && "bg-primary/10 border-primary shadow-lg shadow-primary/20",
-                      !isCompleted && !isActive && "bg-muted border-muted"
-                    )}>
-                      {getStatusIcon(step.key, isActive, isCompleted)}
+                    {/* Step icon - with solid background to hide the progress line */}
+                    <div className="relative flex-shrink-0">
+                      {/* Solid background layer to hide the line */}
+                      <div className="absolute inset-0 h-11 w-11 rounded-full bg-background" />
+                      {/* Actual step circle */}
+                      <div className={cn(
+                        "relative h-11 w-11 rounded-full flex items-center justify-center border-2 transition-all duration-300",
+                        isCompleted && "bg-green-50 border-green-200 dark:bg-green-900 dark:border-green-800",
+                        isActive && "bg-background border-primary shadow-lg shadow-primary/20",
+                        !isCompleted && !isActive && "bg-background border-muted-foreground/20"
+                      )}>
+                        {getStatusIcon(step.key, isActive, isCompleted)}
+                      </div>
                     </div>
 
                     {/* Step text */}
@@ -278,7 +285,7 @@ export function BotStatusIndicator({ status, platform, meetingId, createdAt, onR
                         isActive && "text-primary"
                       )}>
                         {step.label}
-                        {isActive && <span className="text-muted-foreground">{dots}</span>}
+                        {isActive && <span className="inline-block w-4 text-left text-muted-foreground">{dots}</span>}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {step.description}
