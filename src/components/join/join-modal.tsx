@@ -27,6 +27,7 @@ import { useJoinModalStore } from "@/stores/join-modal-store";
 import type { Platform, CreateBotRequest } from "@/types/vexa";
 import { SUPPORTED_LANGUAGES } from "@/types/vexa";
 import { cn } from "@/lib/utils";
+import { getUserFriendlyError } from "@/lib/error-messages";
 
 // Parse Google Meet or Teams URL/meeting ID
 function parseMeetingInput(input: string): { platform: Platform; meetingId: string } | null {
@@ -173,9 +174,8 @@ export function JoinModal() {
       router.push(`/meetings/${meeting.id}`);
     } catch (error) {
       console.error("Failed to create bot:", error);
-      toast.error("Failed to join meeting", {
-        description: (error as Error).message,
-      });
+      const { title, description } = getUserFriendlyError(error as Error);
+      toast.error(title, { description });
     } finally {
       setIsSubmitting(false);
     }

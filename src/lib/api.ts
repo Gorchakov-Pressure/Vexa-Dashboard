@@ -21,16 +21,34 @@ async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const errorText = await response.text();
     let details: unknown;
+    let errorMessage = `API request failed: ${response.statusText}`;
+
     try {
       details = JSON.parse(errorText);
+      // Extract error message from common API error formats
+      if (typeof details === "object" && details !== null) {
+        const errorObj = details as Record<string, unknown>;
+        // FastAPI style: { "detail": "error message" }
+        if (typeof errorObj.detail === "string") {
+          errorMessage = errorObj.detail;
+        }
+        // Alternative: { "error": "error message" }
+        else if (typeof errorObj.error === "string") {
+          errorMessage = errorObj.error;
+        }
+        // Alternative: { "message": "error message" }
+        else if (typeof errorObj.message === "string") {
+          errorMessage = errorObj.message;
+        }
+      }
     } catch {
       details = errorText;
+      if (errorText) {
+        errorMessage = errorText;
+      }
     }
-    throw new VexaAPIError(
-      `API request failed: ${response.statusText}`,
-      response.status,
-      details
-    );
+
+    throw new VexaAPIError(errorMessage, response.status, details);
   }
   return response.json();
 }

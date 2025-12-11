@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Loader2, Check, Clock, DoorOpen, Radio, XCircle, AlertTriangle, RefreshCw } from "lucide-react";
+import { Loader2, Check, Clock, DoorOpen, Radio, XCircle, AlertTriangle, RefreshCw, StopCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { vexaAPI } from "@/lib/api";
+import { toast } from "sonner";
 import type { MeetingStatus, Platform } from "@/types/vexa";
 
 // Timeout in seconds before showing a warning
@@ -18,6 +19,7 @@ interface BotStatusIndicatorProps {
   meetingId: string;
   createdAt?: string;
   onRetry?: () => void;
+  onStopped?: () => void;
 }
 
 const STATUS_STEPS = [
@@ -36,11 +38,29 @@ const STATUS_ORDER: Record<string, number> = {
   failed: -1,
 };
 
-export function BotStatusIndicator({ status, platform, meetingId, createdAt, onRetry }: BotStatusIndicatorProps) {
+export function BotStatusIndicator({ status, platform, meetingId, createdAt, onRetry, onStopped }: BotStatusIndicatorProps) {
   const [dots, setDots] = useState("");
   const [isTimedOut, setIsTimedOut] = useState(false);
   const [isBotRunning, setIsBotRunning] = useState<boolean | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [isStopping, setIsStopping] = useState(false);
+
+  const handleStopBot = useCallback(async () => {
+    setIsStopping(true);
+    try {
+      await vexaAPI.stopBot(platform as Platform, meetingId);
+      toast.success("Bot stopped", {
+        description: "The bot has been stopped and resources freed.",
+      });
+      onStopped?.();
+    } catch (error) {
+      toast.error("Failed to stop bot", {
+        description: (error as Error).message,
+      });
+    } finally {
+      setIsStopping(false);
+    }
+  }, [platform, meetingId, onStopped]);
 
   // Animate dots for loading states
   useEffect(() => {
@@ -114,22 +134,39 @@ export function BotStatusIndicator({ status, platform, meetingId, createdAt, onR
               Bot Failed to Start
             </h2>
             <p className="text-sm text-muted-foreground max-w-sm mb-2">
-              The bot has been in &quot;requested&quot; state for {elapsedSeconds} seconds but doesn&apos;t appear to be running.
+              The bot has been waiting for {elapsedSeconds} seconds but the container never started.
             </p>
             <p className="text-xs text-muted-foreground max-w-sm mb-4">
-              This usually indicates a backend issue with the bot container orchestration.
+              This may be due to server issues or resource limits. Stop this bot to free up your slot and try again.
             </p>
-            {onRetry && (
+            <div className="flex gap-2">
               <Button
-                variant="outline"
+                variant="destructive"
                 size="sm"
-                onClick={onRetry}
+                onClick={handleStopBot}
+                disabled={isStopping}
                 className="gap-2"
               >
-                <RefreshCw className="h-4 w-4" />
-                Try Again
+                {isStopping ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <StopCircle className="h-4 w-4" />
+                )}
+                Stop Bot
               </Button>
-            )}
+              {onRetry && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onRetry}
+                  disabled={isStopping}
+                  className="gap-2"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Retry
+                </Button>
+              )}
+            </div>
           </div>
         </CardContent>
       </Card>
