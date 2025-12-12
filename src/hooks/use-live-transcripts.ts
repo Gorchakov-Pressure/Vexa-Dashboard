@@ -170,8 +170,8 @@ export function useLiveTranscripts(
         wsUrl = config.wsUrl;
         authToken = config.authToken;
       } catch {
-        // Fallback to build-time env var or default
-        wsUrl = process.env.NEXT_PUBLIC_VEXA_WS_URL || "ws://localhost:18056/ws";
+        // Fallback to default (runtime config should always be available)
+        wsUrl = "ws://localhost:18056/ws";
       }
 
       // Append auth token as query parameter if available

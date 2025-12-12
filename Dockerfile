@@ -10,14 +10,9 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build arguments for environment variables
-ARG VEXA_API_URL=http://localhost:18056
-ARG NEXT_PUBLIC_VEXA_API_URL=http://localhost:18056
-
-ENV VEXA_API_URL=$VEXA_API_URL
-ENV NEXT_PUBLIC_VEXA_API_URL=$NEXT_PUBLIC_VEXA_API_URL
-
 # Build application
+# Note: No NEXT_PUBLIC_* variables needed at build time.
+# All client configuration is provided at runtime via /api/config endpoint.
 RUN npm run build
 
 # Production stage

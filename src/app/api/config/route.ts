@@ -7,9 +7,9 @@ import { cookies } from "next/headers";
  * Also returns the user's auth token for WebSocket authentication.
  */
 export async function GET() {
-  const apiUrl = process.env.VEXA_API_URL || process.env.NEXT_PUBLIC_VEXA_API_URL || "http://localhost:18056";
+  const apiUrl = process.env.VEXA_API_URL || "http://localhost:18056";
 
-  // Derive WebSocket URL from API URL
+  // Derive WebSocket URL from API URL (can be overridden with NEXT_PUBLIC_VEXA_WS_URL)
   let wsUrl = process.env.NEXT_PUBLIC_VEXA_WS_URL;
 
   if (!wsUrl) {
@@ -25,7 +25,7 @@ export async function GET() {
 
   return NextResponse.json({
     wsUrl,
-    apiUrl: process.env.NEXT_PUBLIC_VEXA_API_URL || apiUrl,
+    apiUrl,
     authToken: authToken || null,
   });
 }

@@ -41,9 +41,9 @@ async function fetchConfig(): Promise<{ wsUrl: string; authToken: string | null 
     cachedConfig = { wsUrl: config.wsUrl, authToken: config.authToken };
     return cachedConfig;
   } catch {
-    // Fallback
+    // Fallback to default (runtime config should always be available)
     return {
-      wsUrl: process.env.NEXT_PUBLIC_VEXA_WS_URL || "ws://localhost:18056/ws",
+      wsUrl: "ws://localhost:18056/ws",
       authToken: null
     };
   }

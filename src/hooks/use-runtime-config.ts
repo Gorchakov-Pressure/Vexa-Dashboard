@@ -64,10 +64,7 @@ export function getWsUrl(): string {
   if (cachedConfig) {
     return cachedConfig.wsUrl;
   }
-  // Fallback to build-time env vars or default
-  if (typeof window !== "undefined") {
-    return process.env.NEXT_PUBLIC_VEXA_WS_URL || "ws://localhost:18056/ws";
-  }
+  // Fallback to default (runtime config should always be available)
   return "ws://localhost:18056/ws";
 }
 

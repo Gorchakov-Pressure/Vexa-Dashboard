@@ -118,7 +118,7 @@ function SettingsContent() {
               <Label htmlFor="apiUrl">API URL</Label>
               <Input
                 id="apiUrl"
-                value={process.env.NEXT_PUBLIC_VEXA_API_URL || "http://localhost:18056"}
+                value={runtimeConfig?.apiUrl || "Loading..."}
                 disabled
                 className="font-mono bg-muted"
               />
@@ -297,9 +297,8 @@ function SettingsContent() {
           </CardHeader>
           <CardContent>
             <pre className="bg-muted p-4 rounded-lg text-sm overflow-x-auto">
-{`# Vexa API Configuration
+{`# Vexa API Configuration (required)
 VEXA_API_URL=http://localhost:18056
-NEXT_PUBLIC_VEXA_API_URL=http://localhost:18056
 VEXA_ADMIN_API_KEY=your_admin_api_key_here
 
 # AI Assistant Configuration (optional)
