@@ -1,21 +1,26 @@
 import { NextResponse } from "next/server";
 import https from "https";
+import http from "http";
 
 // Force dynamic rendering to avoid Next.js fetch caching issues
 export const dynamic = "force-dynamic";
 
-// Helper function to make HTTP requests using native https module
+// Helper function to make HTTP/HTTPS requests using native modules
 // This bypasses Next.js's patched fetch which has known issues
-function httpsRequest(
+function httpRequest(
   url: string,
   options: { headers?: Record<string, string>; timeout?: number } = {}
 ): Promise<{ ok: boolean; status: number; data: string }> {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
-    const req = https.request(
+    const isHttps = urlObj.protocol === "https:";
+    const transport = isHttps ? https : http;
+    const defaultPort = isHttps ? 443 : 80;
+
+    const req = transport.request(
       {
         hostname: urlObj.hostname,
-        port: urlObj.port || 443,
+        port: urlObj.port || defaultPort,
         path: urlObj.pathname + urlObj.search,
         method: "GET",
         headers: options.headers || {},
@@ -94,7 +99,7 @@ export async function GET() {
     if (adminApiUrl) {
       try {
         const url = `${adminApiUrl}/admin/users?limit=1`;
-        const response = await httpsRequest(url, {
+        const response = await httpRequest(url, {
           headers: { "X-Admin-API-Key": adminApiKey },
           timeout: 10000,
         });
@@ -126,7 +131,7 @@ export async function GET() {
 
     // Test Vexa API reachability using /docs endpoint (Vexa API has Swagger docs)
     try {
-      const response = await httpsRequest(`${vexaApiUrl}/docs`, { timeout: 5000 });
+      const response = await httpRequest(`${vexaApiUrl}/docs`, { timeout: 5000 });
       // Consider any non-5xx response as reachable (200, 301, 404 all mean the server is up)
       status.checks.vexaApi.reachable = response.status < 500;
       if (response.status >= 500) {
