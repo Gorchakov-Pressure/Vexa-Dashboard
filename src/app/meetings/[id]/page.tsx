@@ -101,7 +101,12 @@ export default function MeetingDetailPage() {
     }
   }, [currentMeeting, fetchMeeting, meetingId]);
 
-  // Live transcripts via WebSocket (only when meeting is active)
+  // Live transcripts and status updates via WebSocket (for active and early states)
+  const isEarlyState = currentMeeting?.status === "requested" || 
+                       currentMeeting?.status === "joining" || 
+                       currentMeeting?.status === "awaiting_admission";
+  const shouldUseWebSocket = currentMeeting?.status === "active" || isEarlyState;
+  
   const {
     isConnecting: wsConnecting,
     isConnected: wsConnected,
@@ -111,7 +116,7 @@ export default function MeetingDetailPage() {
     platform: currentMeeting?.platform ?? "google_meet",
     nativeId: currentMeeting?.platform_specific_id ?? "",
     meetingId: meetingId,
-    isActive: currentMeeting?.status === "active",
+    isActive: shouldUseWebSocket,
     onStatusChange: handleStatusChange,
   });
 
@@ -133,22 +138,8 @@ export default function MeetingDetailPage() {
     }
   }, [currentMeeting]);
 
-  // Auto-refresh for early states (requested, joining, awaiting_admission)
-  // Uses refreshMeeting for silent updates without UI flicker
-  useEffect(() => {
-    const isEarlyState =
-      currentMeeting?.status === "requested" ||
-      currentMeeting?.status === "joining" ||
-      currentMeeting?.status === "awaiting_admission";
-
-    if (!isEarlyState || !meetingId) return;
-
-    const interval = setInterval(() => {
-      refreshMeeting(meetingId);
-    }, 3000); // Poll every 3 seconds
-
-    return () => clearInterval(interval);
-  }, [currentMeeting?.status, meetingId, refreshMeeting]);
+  // No longer need polling - WebSocket handles status updates for early states
+  // Removed auto-refresh polling since WebSocket provides real-time updates
 
   // Fetch transcripts when meeting is loaded
   // Use specific properties as dependencies to avoid unnecessary refetches
