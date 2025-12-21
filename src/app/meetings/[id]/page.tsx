@@ -150,16 +150,22 @@ export default function MeetingDetailPage() {
     return () => clearInterval(interval);
   }, [currentMeeting?.status, meetingId, refreshMeeting]);
 
-  // Fetch transcripts when meeting is loaded
+  // Fetch transcripts for completed meetings only (active meetings use WebSocket hook)
   // Use specific properties as dependencies to avoid unnecessary refetches
   const meetingPlatform = currentMeeting?.platform;
   const meetingNativeId = currentMeeting?.platform_specific_id;
+  const meetingStatus = currentMeeting?.status;
 
   useEffect(() => {
-    if (meetingPlatform && meetingNativeId) {
+    // Only fetch transcripts for completed/failed meetings (active meetings bootstrap via WebSocket)
+    if (
+      meetingPlatform &&
+      meetingNativeId &&
+      (meetingStatus === "completed" || meetingStatus === "failed")
+    ) {
       fetchTranscripts(meetingPlatform, meetingNativeId);
     }
-  }, [meetingPlatform, meetingNativeId, fetchTranscripts]);
+  }, [meetingPlatform, meetingNativeId, meetingStatus, fetchTranscripts]);
 
   if (error) {
     return (

@@ -73,6 +73,118 @@ export function TranscriptViewer({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  // Split text into sentence chunks for readability (max chars per chunk)
+  const splitTextIntoSentenceChunks = useCallback((text: string, maxLen: number): string[] => {
+    const normalized = (text || "").trim().replace(/\s+/g, " ");
+    if (normalized.length <= maxLen) return [normalized];
+
+    // Split into sentences on punctuation boundaries. Keep punctuation.
+    const sentences = normalized.split(/(?<=[.!?])\s+/);
+    if (sentences.length === 1) {
+      // Single long sentence: return as one chunk to avoid breaking the sentence
+      return [normalized];
+    }
+
+    const chunks: string[] = [];
+    let current = "";
+    for (const sentence of sentences) {
+      if (current.length === 0) {
+        if (sentence.length > maxLen) {
+          // Sentence itself exceeds limit: do not split it
+          chunks.push(sentence);
+        } else {
+          current = sentence;
+        }
+      } else if (current.length + 1 + sentence.length <= maxLen) {
+        current = current + " " + sentence;
+      } else {
+        chunks.push(current);
+        if (sentence.length > maxLen) {
+          // Sentence exceeds limit: push as is to avoid breaking
+          chunks.push(sentence);
+          current = "";
+        } else {
+          current = sentence;
+        }
+      }
+    }
+    if (current.length > 0) chunks.push(current);
+    return chunks;
+  }, []);
+
+  // Group consecutive segments by speaker and combine text
+  const groupSegmentsBySpeaker = useCallback((segments: TranscriptSegmentType[]) => {
+    if (!segments || segments.length === 0) return [];
+
+    // Sort by absolute_start_time
+    const sorted = [...segments].sort((a, b) =>
+      a.absolute_start_time.localeCompare(b.absolute_start_time)
+    );
+
+    interface GroupedSegment {
+      speaker: string;
+      startTime: string;
+      endTime: string;
+      startTimeSeconds: number;
+      endTimeSeconds: number;
+      combinedText: string;
+      segments: TranscriptSegmentType[];
+    }
+
+    const groups: GroupedSegment[] = [];
+    let current: GroupedSegment | null = null;
+
+    for (const seg of sorted) {
+      const speaker = seg.speaker || "Unknown";
+      const text = (seg.text || "").trim();
+      const startTime = seg.absolute_start_time;
+      const endTime = seg.absolute_end_time || seg.absolute_start_time;
+
+      if (!text) continue;
+
+      if (current && current.speaker === speaker) {
+        // Merge with current group
+        current.combinedText += " " + text;
+        current.endTime = endTime;
+        current.endTimeSeconds = seg.end_time;
+        current.segments.push(seg);
+      } else {
+        // Start new group
+        if (current) groups.push(current);
+        current = {
+          speaker,
+          startTime,
+          endTime,
+          startTimeSeconds: seg.start_time,
+          endTimeSeconds: seg.end_time,
+          combinedText: text,
+          segments: [seg],
+        };
+      }
+    }
+
+    if (current) groups.push(current);
+
+    // Split long combinedText into chunks for readability (max 512 chars)
+    const MAX_CHARS = 512;
+    const splitGroups: GroupedSegment[] = [];
+    for (const g of groups) {
+      const chunks = splitTextIntoSentenceChunks(g.combinedText, MAX_CHARS);
+      if (chunks.length <= 1) {
+        splitGroups.push(g);
+      } else {
+        for (const chunk of chunks) {
+          splitGroups.push({
+            ...g,
+            combinedText: chunk,
+          });
+        }
+      }
+    }
+
+    return splitGroups;
+  }, [splitTextIntoSentenceChunks]);
+
   // Get unique speakers in order of appearance
   const speakerOrder = useMemo(() => {
     const speakers: string[] = [];
@@ -84,27 +196,32 @@ export function TranscriptViewer({
     return speakers;
   }, [segments]);
 
-  // Filter segments by search query and selected speakers
+  // Group segments by speaker first, then filter
+  const groupedSegments = useMemo(() => {
+    return groupSegmentsBySpeaker(segments);
+  }, [segments, groupSegmentsBySpeaker]);
+
+  // Filter grouped segments by search query and selected speakers
   const filteredSegments = useMemo(() => {
-    let result = segments;
+    let result = groupedSegments;
 
     // Filter by selected speakers
     if (selectedSpeakers.length > 0) {
-      result = result.filter((s) => selectedSpeakers.includes(s.speaker));
+      result = result.filter((g) => selectedSpeakers.includes(g.speaker));
     }
 
     // Filter by search query
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       result = result.filter(
-        (s) =>
-          s.text.toLowerCase().includes(query) ||
-          s.speaker.toLowerCase().includes(query)
+        (g) =>
+          g.combinedText.toLowerCase().includes(query) ||
+          g.speaker.toLowerCase().includes(query)
       );
     }
 
     return result;
-  }, [segments, searchQuery, selectedSpeakers]);
+  }, [groupedSegments, searchQuery, selectedSpeakers]);
 
   // Toggle speaker selection
   const toggleSpeaker = useCallback((speaker: string) => {
@@ -123,7 +240,7 @@ export function TranscriptViewer({
 
   const hasActiveFilters = searchQuery.trim() || selectedSpeakers.length > 0;
 
-  // Auto-scroll to bottom when live and new segments arrive
+  // Auto-scroll to bottom when live and new segments/groups arrive
   useEffect(() => {
     if (isLive && scrollRef.current) {
       const scrollContainer = scrollRef.current.querySelector('[data-radix-scroll-area-viewport]');
@@ -131,7 +248,7 @@ export function TranscriptViewer({
         scrollContainer.scrollTop = scrollContainer.scrollHeight;
       }
     }
-  }, [segments.length, isLive]);
+  }, [groupedSegments.length, isLive]);
 
   // Export handlers
   const handleExport = (format: "txt" | "json" | "srt" | "vtt") => {
@@ -324,7 +441,8 @@ export function TranscriptViewer({
         {hasActiveFilters && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground animate-fade-in">
             <span>
-              Showing {filteredSegments.length} of {segments.length} segments
+              Showing {filteredSegments.length} of {groupedSegments.length} groups
+              {segments.length !== groupedSegments.length && ` (${segments.length} segments)`}
             </span>
             {searchQuery && (
               <Badge variant="outline" className="font-normal">
@@ -379,23 +497,40 @@ export function TranscriptViewer({
             </div>
           ) : (
             <div className="space-y-1">
-              {filteredSegments.map((segment, index) => (
-                <div
-                  key={segment.id || `${segment.absolute_start_time}-${index}`}
-                  className="animate-fade-in"
-                  style={{
-                    animationDelay: isLive ? "0ms" : `${Math.min(index * 20, 200)}ms`,
-                    animationFillMode: "backwards",
-                  }}
-                >
-                  <TranscriptSegment
-                    segment={segment}
-                    speakerColor={getSpeakerColor(segment.speaker, speakerOrder)}
-                    searchQuery={searchQuery}
-                    isHighlighted={searchQuery.length > 0}
-                  />
-                </div>
-              ))}
+              {filteredSegments.map((group, index) => {
+                // Create a synthetic segment for the grouped segment
+                const syntheticSegment: TranscriptSegmentType = {
+                  id: `${group.startTime}-${index}`,
+                  meeting_id: meeting.id,
+                  start_time: group.startTimeSeconds,
+                  end_time: group.endTimeSeconds,
+                  absolute_start_time: group.startTime,
+                  absolute_end_time: group.endTime,
+                  text: group.combinedText,
+                  speaker: group.speaker,
+                  language: group.segments[0]?.language || "en",
+                  session_uid: group.segments[0]?.session_uid || "",
+                  created_at: group.startTime,
+                };
+
+                return (
+                  <div
+                    key={`${group.startTime}-${index}`}
+                    className="animate-fade-in"
+                    style={{
+                      animationDelay: isLive ? "0ms" : `${Math.min(index * 20, 200)}ms`,
+                      animationFillMode: "backwards",
+                    }}
+                  >
+                    <TranscriptSegment
+                      segment={syntheticSegment}
+                      speakerColor={getSpeakerColor(group.speaker, speakerOrder)}
+                      searchQuery={searchQuery}
+                      isHighlighted={searchQuery.length > 0}
+                    />
+                  </div>
+                );
+              })}
             </div>
           )}
         </ScrollArea>

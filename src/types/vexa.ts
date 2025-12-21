@@ -85,6 +85,7 @@ export interface BotConfigUpdate {
 // WebSocket Types
 export type WebSocketMessageType =
   | "transcript.mutable"
+  | "transcript.finalized"
   | "meeting.status"
   | "subscribed"
   | "pong"
