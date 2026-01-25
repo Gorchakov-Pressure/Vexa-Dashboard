@@ -32,6 +32,7 @@ services:
     restart: unless-stopped
     networks:
       - vexa-network
+      - vexa-dev
 
   # Optional: Include Vexa API for full stack deployment
   # Uncomment the section below to run Vexa alongside the dashboard
@@ -65,6 +66,9 @@ services:
 networks:
   vexa-network:
     driver: bridge
+  vexa-dev:
+    external: true
+    name: vexa_dev_vexa_default
 
 # volumes:
 #   vexa-data:
