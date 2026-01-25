@@ -43,13 +43,29 @@ async function proxyRequest(
     const response = await fetch(url, fetchOptions);
 
     // Handle empty responses
-    const contentType = response.headers.get("content-type");
-    if (response.status === 204 || !contentType?.includes("application/json")) {
+    const contentType = response.headers.get("content-type") || "";
+    if (response.status === 204) {
       return new NextResponse(null, { status: response.status });
     }
 
-    const data = await response.json();
-    return NextResponse.json(data, { status: response.status });
+    // Prefer JSON passthrough when possible, but do not drop non-JSON error bodies
+    const text = await response.text();
+    if (contentType.includes("application/json") && text) {
+      try {
+        const data = JSON.parse(text);
+        return NextResponse.json(data, { status: response.status });
+      } catch {
+        // fall through to plain text passthrough
+      }
+    }
+
+    // If upstream sent non-JSON (or invalid JSON), pass through raw text and content-type
+    return new NextResponse(text || null, {
+      status: response.status,
+      headers: {
+        "Content-Type": contentType || "text/plain; charset=utf-8",
+      },
+    });
   } catch (error) {
     console.error(`Proxy error for ${method} ${url}:`, error);
     return NextResponse.json(

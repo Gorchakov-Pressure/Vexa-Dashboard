@@ -66,7 +66,9 @@ export default function BotsPage() {
         notes={[
           "The bot will transition through statuses: requested → joining → awaiting_admission → active",
           "For Google Meet, meeting IDs follow the format: abc-defg-hij",
-          "For Microsoft Teams, meeting IDs are numeric and require a passcode",
+          "For Microsoft Teams, you can provide either a numeric Meeting ID or a meetup-join URL (teams.microsoft.com/l/meetup-join/...)",
+          "Passcode is optional for Teams. If the meeting prompts for a passcode and you provide it, the bot will use it; otherwise it will wait for lobby approval",
+          "When you provide a Teams meetup-join URL, the API will return a normalized native_meeting_id (e.g. teams_<hash>) for URL-safe routing",
           "The language parameter is optional. If not specified, the bot will auto-detect the language",
         ]}
         />

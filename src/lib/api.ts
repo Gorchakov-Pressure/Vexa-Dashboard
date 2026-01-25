@@ -32,6 +32,21 @@ async function handleResponse<T>(response: Response): Promise<T> {
         if (typeof errorObj.detail === "string") {
           errorMessage = errorObj.detail;
         }
+        // FastAPI validation style: { "detail": [ { msg: "..." }, ... ] }
+        else if (Array.isArray(errorObj.detail)) {
+          const first = errorObj.detail[0] as unknown;
+          if (typeof first === "object" && first !== null) {
+            const firstObj = first as Record<string, unknown>;
+            if (typeof firstObj.msg === "string") {
+              errorMessage = firstObj.msg;
+            } else {
+              // Fallback: stringify first error item
+              errorMessage = JSON.stringify(firstObj);
+            }
+          } else if (typeof first === "string") {
+            errorMessage = first;
+          }
+        }
         // Alternative: { "error": "error message" }
         else if (typeof errorObj.error === "string") {
           errorMessage = errorObj.error;
