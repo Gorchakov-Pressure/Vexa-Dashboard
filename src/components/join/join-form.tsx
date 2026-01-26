@@ -47,7 +47,10 @@ export function JoinForm({ onSuccess }: JoinFormProps) {
     if (platform === "google_meet") {
       return /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(id.trim().toLowerCase());
     }
-    return id.trim().length > 0;
+    // Teams: accept either numeric Meeting ID or full meetup-join URL
+    const trimmed = id.trim();
+    if (/^\d{9,}$/.test(trimmed)) return true;
+    return /^(https?:\/\/)?teams\.microsoft\.com\/l\/meetup-join\//i.test(trimmed);
   };
 
   const meetingIdValidation = useMemo(() => {
@@ -66,18 +69,11 @@ export function JoinForm({ onSuccess }: JoinFormProps) {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const cleanMeetingId = meetingId.trim().toLowerCase();
+    const cleanMeetingId = platform === "google_meet" ? meetingId.trim().toLowerCase() : meetingId.trim();
 
     if (!validateMeetingId(cleanMeetingId)) {
       toast.error("Invalid meeting ID", {
         description: `Please enter a valid ${platformConfig.name} meeting ID`,
-      });
-      return;
-    }
-
-    if (platform === "teams" && !passcode.trim()) {
-      toast.error("Passcode required", {
-        description: "Microsoft Teams meetings require a passcode",
       });
       return;
     }
@@ -108,7 +104,8 @@ export function JoinForm({ onSuccess }: JoinFormProps) {
       });
 
       setActiveMeeting(meeting);
-      onSuccess?.(meeting.id, platform, cleanMeetingId);
+      // IMPORTANT: backend may normalize Teams meetup-join URL into URL-safe native id (e.g. teams_<hash>)
+      onSuccess?.(meeting.id, platform, meeting.platform_specific_id);
 
     } catch (error) {
       console.error("Failed to create bot:", error);
@@ -221,7 +218,7 @@ export function JoinForm({ onSuccess }: JoinFormProps) {
             <div className="relative">
               <Input
                 id="meetingId"
-                placeholder={platformConfig.placeholder}
+                placeholder={platform === "teams" ? "Paste Teams meetup link or Meeting ID" : platformConfig.placeholder}
                 value={meetingId}
                 onChange={(e) => setMeetingId(e.target.value)}
                 onBlur={() => setTouched({ ...touched, meetingId: true })}
@@ -262,17 +259,17 @@ export function JoinForm({ onSuccess }: JoinFormProps) {
                 ? meetingIdValidation.message
                 : platform === "google_meet"
                 ? "Enter the meeting code from the URL (e.g., abc-defg-hij)"
-                : "Enter the numeric meeting ID from your Teams invitation"}
+                : "Paste a Teams meetup link (meetup-join) or enter a numeric Meeting ID"}
             </p>
           </div>
 
           {/* Passcode (Teams only) */}
           {platform === "teams" && (
             <div className="space-y-2">
-              <Label htmlFor="passcode">Passcode</Label>
+              <Label htmlFor="passcode">Passcode (optional)</Label>
               <Input
                 id="passcode"
-                placeholder="Enter meeting passcode"
+                placeholder="Enter meeting passcode (if required)"
                 value={passcode}
                 onChange={(e) => setPasscode(e.target.value)}
               />

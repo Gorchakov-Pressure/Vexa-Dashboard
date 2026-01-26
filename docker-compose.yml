@@ -9,6 +9,9 @@ services:
     environment:
       # Vexa API Connection (runtime configuration)
       - VEXA_API_URL=${VEXA_API_URL:-http://vexa-api:18056}
+      # WebSocket URL must be reachable from the browser (NOT docker-internal hostnames like api-gateway)
+      # For local dev with vexa_dev, api-gateway is published as localhost:8056
+      - NEXT_PUBLIC_VEXA_WS_URL=${NEXT_PUBLIC_VEXA_WS_URL:-ws://localhost:8056/ws}
 
       # Admin API (required for authentication)
       - VEXA_ADMIN_API_KEY=${VEXA_ADMIN_API_KEY}
@@ -32,6 +35,7 @@ services:
     restart: unless-stopped
     networks:
       - vexa-network
+      - vexa-dev
 
   # Optional: Include Vexa API for full stack deployment
   # Uncomment the section below to run Vexa alongside the dashboard
@@ -65,6 +69,9 @@ services:
 networks:
   vexa-network:
     driver: bridge
+  vexa-dev:
+    external: true
+    name: vexa_dev_vexa_default
 
 # volumes:
 #   vexa-data:
