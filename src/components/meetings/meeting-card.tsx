@@ -50,8 +50,8 @@ export function MeetingCard({ meeting }: MeetingCardProps) {
   const updateMeetingData = useMeetingsStore((state) => state.updateMeetingData);
   // Platform detection - check if it's Google Meet (not Teams)
   const isGoogleMeet = meeting.platform !== "teams";
-  // Display title from API data (name or title field)
-  const displayTitle = meeting.data?.name || meeting.data?.title;
+  // Display title from API data (name or title field). Avoid showing raw ID as primary title.
+  const displayTitle = meeting.data?.name || meeting.data?.title || "Без названия";
   const isActive = meeting.status === "active";
   
   // Title editing state
@@ -141,7 +141,7 @@ export function MeetingCard({ meeting }: MeetingCardProps) {
   const handleStartEdit = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setEditedTitle(displayTitle || "");
+    setEditedTitle(meeting.data?.name || meeting.data?.title || "");
     setIsEditingTitle(true);
   };
 
@@ -284,7 +284,7 @@ export function MeetingCard({ meeting }: MeetingCardProps) {
                         "transition-colors duration-200",
                         "group-hover:text-primary"
                       )}>
-                        {displayTitle || meeting.platform_specific_id}
+                        {displayTitle}
                       </h3>
                       <Button
                         size="icon"
@@ -301,7 +301,7 @@ export function MeetingCard({ meeting }: MeetingCardProps) {
                       With {meeting.data.participants.slice(0, 3).join(", ")}
                       {meeting.data.participants.length > 3 && ` +${meeting.data.participants.length - 3}`}
                     </p>
-                  ) : displayTitle && !isEditingTitle && (
+                  ) : !isEditingTitle && (
                     <p className="text-xs text-muted-foreground font-mono truncate mt-0.5">
                       {meeting.platform_specific_id}
                     </p>

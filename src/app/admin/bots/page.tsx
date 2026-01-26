@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { formatDistanceToNow, format } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
 import {
   Bot,
   RefreshCw,
@@ -10,10 +10,8 @@ import {
   Clock,
   CheckCircle,
   XCircle,
-  AlertTriangle,
   Loader2,
   Video,
-  Users,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -234,60 +232,84 @@ export default function AdminBotsPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {runningBots.map((bot) => (
-                <div
-                  key={bot.container_id}
-                  className="flex items-center justify-between p-3 bg-white dark:bg-gray-900 rounded-lg border"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="h-8 w-8 rounded-full bg-green-500 flex items-center justify-center">
-                      <Bot className="h-4 w-4 text-white" />
-                    </div>
-                    <div>
-                      <p className="font-medium font-mono text-sm">{bot.native_meeting_id}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {bot.platform} • Container: {bot.container_id.slice(0, 12)}
-                      </p>
-                    </div>
-                  </div>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        disabled={stoppingBots.has(`${bot.platform}:${bot.native_meeting_id}`)}
-                      >
-                        {stoppingBots.has(`${bot.platform}:${bot.native_meeting_id}`) ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <>
-                            <StopCircle className="mr-1 h-4 w-4" />
-                            Stop
-                          </>
+              {runningBots.map((bot) => {
+                const platform = bot.platform as Platform;
+                const meeting = meetings.find(
+                  (m) => m.platform === platform && m.platform_specific_id === bot.native_meeting_id
+                );
+                const meetingTitle = meeting?.data?.name || meeting?.data?.title || "Без названия";
+                const showSecondaryId = true;
+
+                return (
+                  <div
+                    key={bot.container_id}
+                    className="flex items-center justify-between p-3 bg-white dark:bg-gray-900 rounded-lg border"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="h-8 w-8 rounded-full bg-green-500 flex items-center justify-center shrink-0">
+                        <Bot className="h-4 w-4 text-white" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm truncate">
+                          {meetingTitle}
+                        </p>
+                        {showSecondaryId && (
+                          <p className="text-xs text-muted-foreground font-mono truncate">
+                            {bot.native_meeting_id}
+                          </p>
                         )}
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Stop this bot?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                          This will stop the transcription bot for meeting {bot.native_meeting_id}.
-                          The meeting will be marked as completed.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                          className="bg-destructive hover:bg-destructive/90"
-                          onClick={() => handleStopBot(bot.platform as Platform, bot.native_meeting_id)}
+                        <p className="text-xs text-muted-foreground">
+                          {bot.platform} • Container: {bot.container_id.slice(0, 12)}
+                        </p>
+                      </div>
+                    </div>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={stoppingBots.has(`${bot.platform}:${bot.native_meeting_id}`)}
                         >
-                          Stop Bot
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
-                </div>
-              ))}
+                          {stoppingBots.has(`${bot.platform}:${bot.native_meeting_id}`) ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <>
+                              <StopCircle className="mr-1 h-4 w-4" />
+                              Stop
+                            </>
+                          )}
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Stop this bot?</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            This will stop the transcription bot for meeting{" "}
+                            {meetingTitle !== "Без названия" ? (
+                              <>
+                                <span className="font-medium">{meetingTitle}</span>{" "}
+                                <span className="font-mono">({bot.native_meeting_id})</span>
+                              </>
+                            ) : (
+                              <span className="font-mono">{bot.native_meeting_id}</span>
+                            )}
+                            . The meeting will be marked as completed.
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive hover:bg-destructive/90"
+                            onClick={() => handleStopBot(platform, bot.native_meeting_id)}
+                          >
+                            Stop Bot
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         </Card>
@@ -337,11 +359,27 @@ export default function AdminBotsPage() {
                     const duration = meeting.start_time && meeting.end_time
                       ? Math.round((new Date(meeting.end_time).getTime() - new Date(meeting.start_time).getTime()) / 60000)
                       : null;
+                    const meetingTitle = meeting.data?.name || meeting.data?.title || "Без названия";
+                    const showSecondaryId = true;
 
                     return (
                       <TableRow key={meeting.id}>
-                        <TableCell className="font-mono text-sm">
-                          {meeting.platform_specific_id}
+                        <TableCell className="min-w-0">
+                          <div className="min-w-0">
+                            <div
+                              className={cn(
+                                "truncate",
+                                "font-medium"
+                              )}
+                            >
+                              {meetingTitle}
+                            </div>
+                            {showSecondaryId && (
+                              <div className="text-xs text-muted-foreground font-mono truncate">
+                                {meeting.platform_specific_id}
+                              </div>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline" className="capitalize">
