@@ -75,6 +75,7 @@ export interface CreateBotRequest {
   passcode?: string;
   bot_name?: string;
   language?: string;
+  task?: "transcribe" | "translate";
 }
 
 export interface BotConfigUpdate {

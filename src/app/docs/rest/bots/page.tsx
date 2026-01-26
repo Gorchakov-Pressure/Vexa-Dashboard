@@ -33,6 +33,7 @@ export default function BotsPage() {
             passcode: "optional_passcode",
             bot_name: "Vexa Transcription Bot",
             language: "en",
+            task: "transcribe",
           },
         }}
         responseExample={{

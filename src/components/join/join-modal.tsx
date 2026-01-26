@@ -26,6 +26,7 @@ import { useLiveStore } from "@/stores/live-store";
 import { useJoinModalStore } from "@/stores/join-modal-store";
 import { useMeetingsStore } from "@/stores/meetings-store";
 import { useRuntimeConfig } from "@/hooks/use-runtime-config";
+import { useUserBotDefaults } from "@/hooks/use-user-bot-defaults";
 import type { Platform, CreateBotRequest } from "@/types/vexa";
 import { SUPPORTED_LANGUAGES } from "@/types/vexa";
 import { cn } from "@/lib/utils";
@@ -144,6 +145,7 @@ export function JoinModal() {
   const { setActiveMeeting } = useLiveStore();
   const { setCurrentMeeting } = useMeetingsStore();
   const { config } = useRuntimeConfig();
+  const { defaults: userDefaults } = useUserBotDefaults();
 
   const [meetingInput, setMeetingInput] = useState("");
   const [platform, setPlatform] = useState<Platform>("google_meet");
@@ -152,11 +154,24 @@ export function JoinModal() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [botName, setBotName] = useState("");
   const [passcode, setPasscode] = useState("");
+  const [languageTouched, setLanguageTouched] = useState(false);
+  const [botNameTouched, setBotNameTouched] = useState(false);
 
   // Set default language on mount
   useEffect(() => {
     setLanguage(getBrowserLanguage());
   }, []);
+
+  // Apply user defaults (do not override explicit user choice)
+  useEffect(() => {
+    if (!userDefaults) return;
+    if (!languageTouched && userDefaults.language) {
+      setLanguage(userDefaults.language);
+    }
+    if (!botNameTouched && !botName.trim() && userDefaults.bot_name) {
+      setBotName(userDefaults.bot_name);
+    }
+  }, [userDefaults, languageTouched, botNameTouched, botName]);
 
   // Reset form when modal closes
   useEffect(() => {
@@ -167,6 +182,8 @@ export function JoinModal() {
       setShowAdvanced(false);
       setBotName("");
       setPasscode("");
+      setLanguageTouched(false);
+      setBotNameTouched(false);
     }
   }, [isOpen]);
 
@@ -205,6 +222,15 @@ export function JoinModal() {
       finalPasscode = parsedInput.passcode || passcode.trim();
     }
 
+    if (parsedInput.platform === "teams" && finalPasscode) {
+      if (!/^[A-Za-z0-9]{8,20}$/.test(finalPasscode)) {
+        toast.error("Неверный passcode", {
+          description: "Для Teams passcode должен быть 8–20 символов (только латиница и цифры).",
+        });
+        return;
+      }
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -219,10 +245,20 @@ export function JoinModal() {
       }
 
       // Set bot name - use custom name or configured default
-      request.bot_name = botName.trim() || config?.defaultBotName || "Vexa - Open Source Bot";
+      request.bot_name =
+        botName.trim() ||
+        userDefaults?.bot_name ||
+        config?.defaultBotName ||
+        "Vexa - Open Source Bot";
 
       if (language && language !== "auto") {
         request.language = language;
+      } else if (userDefaults?.language && userDefaults.language !== "auto") {
+        request.language = userDefaults.language;
+      }
+
+      if (userDefaults?.task) {
+        request.task = userDefaults.task;
       }
 
       const meeting = await vexaAPI.createBot(request);
@@ -245,7 +281,7 @@ export function JoinModal() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [parsedInput, passcode, botName, language, config, setActiveMeeting, setCurrentMeeting, closeModal, router]);
+  }, [parsedInput, passcode, botName, language, config, userDefaults, setActiveMeeting, setCurrentMeeting, closeModal, router]);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && closeModal()}>
@@ -357,7 +393,7 @@ export function JoinModal() {
               <Globe className="h-3.5 w-3.5" />
               Transcription Language
             </Label>
-            <Select value={language} onValueChange={setLanguage}>
+            <Select value={language} onValueChange={(v) => { setLanguageTouched(true); setLanguage(v); }}>
               <SelectTrigger id="language" className="h-10">
                 <SelectValue placeholder="Select language" />
               </SelectTrigger>
@@ -396,7 +432,7 @@ export function JoinModal() {
                   id="botName"
                   placeholder="Meeting Assistant"
                   value={botName}
-                  onChange={(e) => setBotName(e.target.value)}
+                  onChange={(e) => { setBotNameTouched(true); setBotName(e.target.value); }}
                   className="h-10"
                 />
               </div>

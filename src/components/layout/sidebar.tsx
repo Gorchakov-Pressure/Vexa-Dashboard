@@ -37,7 +37,7 @@ const navigation = [
 const adminNavigation = [
   { name: "Users", href: "/admin/users", icon: Users },
   { name: "Bots", href: "/admin/bots", icon: Bot },
-  { name: "Settings", href: "/settings", icon: Settings },
+  { name: "Settings", href: "/admin/settings", icon: Settings },
 ];
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
