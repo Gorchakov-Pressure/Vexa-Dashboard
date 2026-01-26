@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { Video, Loader2, Check, AlertCircle, Sparkles } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +18,7 @@ import { toast } from "sonner";
 import { vexaAPI } from "@/lib/api";
 import { useLiveStore } from "@/stores/live-store";
 import { useRuntimeConfig } from "@/hooks/use-runtime-config";
+import { useUserBotDefaults } from "@/hooks/use-user-bot-defaults";
 import type { Platform, CreateBotRequest } from "@/types/vexa";
 import { PLATFORM_CONFIG, SUPPORTED_LANGUAGES } from "@/types/vexa";
 import { cn } from "@/lib/utils";
@@ -31,6 +32,7 @@ export function JoinForm({ onSuccess }: JoinFormProps) {
   const router = useRouter();
   const { setActiveMeeting } = useLiveStore();
   const { config } = useRuntimeConfig();
+  const { defaults: userDefaults } = useUserBotDefaults();
 
   const [platform, setPlatform] = useState<Platform>("google_meet");
   const [meetingId, setMeetingId] = useState("");
@@ -41,6 +43,17 @@ export function JoinForm({ onSuccess }: JoinFormProps) {
   const [touched, setTouched] = useState<Record<string, boolean>>({});
 
   const platformConfig = PLATFORM_CONFIG[platform];
+
+  // Apply user defaults once (do not override user input)
+  useEffect(() => {
+    if (!userDefaults) return;
+    if (!botName.trim() && userDefaults.bot_name) {
+      setBotName(userDefaults.bot_name);
+    }
+    if (language === "auto" && userDefaults.language) {
+      setLanguage(userDefaults.language);
+    }
+  }, [userDefaults, botName, language]);
 
   const validateMeetingId = (id: string): boolean => {
     if (!id.trim()) return false;
@@ -78,6 +91,16 @@ export function JoinForm({ onSuccess }: JoinFormProps) {
       return;
     }
 
+    if (platform === "teams" && passcode) {
+      const trimmed = passcode.trim();
+      if (!/^[A-Za-z0-9]{8,20}$/.test(trimmed)) {
+        toast.error("Неверный passcode", {
+          description: "Для Teams passcode должен быть 8–20 символов (только латиница и цифры).",
+        });
+        return;
+      }
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -91,10 +114,20 @@ export function JoinForm({ onSuccess }: JoinFormProps) {
       }
 
       // Set bot name - use custom name or configured default
-      request.bot_name = botName.trim() || config?.defaultBotName || "Vexa - Open Source Bot";
+      request.bot_name =
+        botName.trim() ||
+        userDefaults?.bot_name ||
+        config?.defaultBotName ||
+        "Vexa - Open Source Bot";
 
       if (language && language !== "auto") {
         request.language = language;
+      } else if (userDefaults?.language && userDefaults.language !== "auto") {
+        request.language = userDefaults.language;
+      }
+
+      if (userDefaults?.task) {
+        request.task = userDefaults.task;
       }
 
       const meeting = await vexaAPI.createBot(request);

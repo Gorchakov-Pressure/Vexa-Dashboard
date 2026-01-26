@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Cursor agent artifacts / skills (not part of app source):
+    ".cursor/**",
   ]),
 ]);
 
