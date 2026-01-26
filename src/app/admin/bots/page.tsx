@@ -237,8 +237,8 @@ export default function AdminBotsPage() {
                 const meeting = meetings.find(
                   (m) => m.platform === platform && m.platform_specific_id === bot.native_meeting_id
                 );
-                const meetingTitle = meeting?.data?.name || meeting?.data?.title;
-                const showSecondaryId = Boolean(meetingTitle);
+                const meetingTitle = meeting?.data?.name || meeting?.data?.title || "Без названия";
+                const showSecondaryId = true;
 
                 return (
                   <div
@@ -251,7 +251,7 @@ export default function AdminBotsPage() {
                       </div>
                       <div className="min-w-0">
                         <p className="font-medium text-sm truncate">
-                          {meetingTitle || bot.native_meeting_id}
+                          {meetingTitle}
                         </p>
                         {showSecondaryId && (
                           <p className="text-xs text-muted-foreground font-mono truncate">
@@ -285,7 +285,7 @@ export default function AdminBotsPage() {
                           <AlertDialogTitle>Stop this bot?</AlertDialogTitle>
                           <AlertDialogDescription>
                             This will stop the transcription bot for meeting{" "}
-                            {meetingTitle ? (
+                            {meetingTitle !== "Без названия" ? (
                               <>
                                 <span className="font-medium">{meetingTitle}</span>{" "}
                                 <span className="font-mono">({bot.native_meeting_id})</span>
@@ -359,8 +359,8 @@ export default function AdminBotsPage() {
                     const duration = meeting.start_time && meeting.end_time
                       ? Math.round((new Date(meeting.end_time).getTime() - new Date(meeting.start_time).getTime()) / 60000)
                       : null;
-                    const meetingTitle = meeting.data?.name || meeting.data?.title;
-                    const showSecondaryId = Boolean(meetingTitle);
+                    const meetingTitle = meeting.data?.name || meeting.data?.title || "Без названия";
+                    const showSecondaryId = true;
 
                     return (
                       <TableRow key={meeting.id}>
@@ -369,10 +369,10 @@ export default function AdminBotsPage() {
                             <div
                               className={cn(
                                 "truncate",
-                                showSecondaryId ? "font-medium" : "font-mono text-sm"
+                                "font-medium"
                               )}
                             >
-                              {meetingTitle || meeting.platform_specific_id}
+                              {meetingTitle}
                             </div>
                             {showSecondaryId && (
                               <div className="text-xs text-muted-foreground font-mono truncate">
