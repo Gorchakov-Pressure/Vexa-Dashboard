@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback, type CSSProperties } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo, type CSSProperties } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -24,7 +24,10 @@ import {
   ChevronDown,
   Settings,
   ExternalLink,
+  Trash2,
+  Zap,
 } from "lucide-react";
+import { AudioPlayer, type AudioPlayerHandle, type AudioFragment } from "@/components/recording/audio-player";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +38,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { ErrorState } from "@/components/ui/error-state";
 import { TranscriptViewer } from "@/components/transcript/transcript-viewer";
 import { BotStatusIndicator, BotFailedIndicator } from "@/components/meetings/bot-status-indicator";
+// ChatPanel removed — chat messages now render inline in TranscriptViewer
 import { AIChatPanel } from "@/components/ai";
 import { useMeetingsStore } from "@/stores/meetings-store";
 import { useLiveTranscripts } from "@/hooks/use-live-transcripts";
@@ -44,14 +48,8 @@ import { StatusHistory } from "@/components/meetings/status-history";
 import { cn } from "@/lib/utils";
 import { vexaAPI } from "@/lib/api";
 import { toast } from "sonner";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { SUPPORTED_LANGUAGES } from "@/types/vexa";
+import { LanguagePicker } from "@/components/language-picker";
+import { WHISPER_LANGUAGE_CODES, getLanguageDisplayName } from "@/lib/languages";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -80,6 +78,7 @@ import {
 } from "@/lib/export";
 import { getCookie, setCookie } from "@/lib/cookies";
 import { DocsLink } from "@/components/docs/docs-link";
+import { DecisionsPanel } from "@/components/decisions/decisions-panel";
 
 export default function MeetingDetailPage() {
   const params = useParams();
@@ -90,6 +89,8 @@ export default function MeetingDetailPage() {
   const {
     currentMeeting,
     transcripts,
+    recordings,
+    chatMessages,
     isLoadingMeeting,
     isLoadingTranscripts,
     isUpdatingMeeting,
@@ -97,9 +98,15 @@ export default function MeetingDetailPage() {
     fetchMeeting,
     refreshMeeting,
     fetchTranscripts,
+    fetchChatMessages,
+    updateMeetingStatus,
     updateMeetingData,
+    deleteMeeting,
     clearCurrentMeeting,
   } = useMeetingsStore();
+
+  // Decisions panel state
+  const [decisionsOpen, setDecisionsOpen] = useState(false);
 
   // Title editing state
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -127,6 +134,9 @@ export default function MeetingDetailPage() {
 
   // Bot control state
   const [isStoppingBot, setIsStoppingBot] = useState(false);
+  const [isDeletingMeeting, setIsDeletingMeeting] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [forcePostMeetingMode, setForcePostMeetingMode] = useState(false);
   
   // Bot config state
   const [currentLanguage, setCurrentLanguage] = useState<string | undefined>(
@@ -134,16 +144,119 @@ export default function MeetingDetailPage() {
   );
   const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
 
+  // Audio playback state
+  const audioPlayerRef = useRef<AudioPlayerHandle>(null);
+  const [playbackTime, setPlaybackTime] = useState<number | null>(null);
+  const [isPlaybackActive, setIsPlaybackActive] = useState(false);
+  const [pendingSeekTime, setPendingSeekTime] = useState<number | null>(null);
+  const [activeFragmentIndex, setActiveFragmentIndex] = useState(0);
+
+  // Build ordered recording fragments for multi-fragment playback.
+  // Each recording has a session_uid, created_at, and media_files with duration.
+  // Sort by created_at so fragments play sequentially.
+  const recordingFragments = useMemo((): AudioFragment[] => {
+    // Include recordings that have audio media files, whether completed or in_progress
+    // (in_progress recordings may have snapshot uploads available for playback)
+    const availableRecordings = recordings
+      .filter(r => (r.status === "completed" || r.status === "in_progress") && r.media_files?.some(mf => mf.type === "audio"))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at));
+
+    return availableRecordings.map(rec => {
+      const audioMedia = rec.media_files.find(mf => mf.type === "audio")!;
+      return {
+        src: vexaAPI.getRecordingAudioUrl(rec.id, audioMedia.id),
+        duration: audioMedia.duration_seconds || 0,
+        sessionUid: rec.session_uid,
+        createdAt: rec.created_at,
+      };
+    });
+  }, [recordings]);
+
+  const hasRecordingAudio = recordingFragments.length > 0;
+
+  const handlePlaybackTimeUpdate = useCallback((time: number) => {
+    setPlaybackTime(time);
+    setIsPlaybackActive(true);
+  }, []);
+
+  const handleFragmentChange = useCallback((index: number) => {
+    setActiveFragmentIndex(index);
+  }, []);
+
+  // Map a segment click to the correct recording fragment.
+  // `startTimeSeconds` is the segment's start_time (relative to its session).
+  // `absoluteStartTime` is the segment's absolute_start_time (wall-clock ISO string).
+  // We use absolute_start_time to find which recording fragment the segment belongs to,
+  // then use start_time as the seek offset within that fragment (since start_time is
+  // relative to the session and each recording fragment corresponds to one session).
+  const handleSegmentClick = useCallback((startTimeSeconds: number, absoluteStartTime?: string) => {
+    if (!hasRecordingAudio) {
+      setPendingSeekTime(startTimeSeconds);
+      return;
+    }
+
+    if (recordingFragments.length <= 1) {
+      // Single recording — simple seek
+      audioPlayerRef.current?.seekTo(startTimeSeconds);
+      setPlaybackTime(startTimeSeconds);
+      setIsPlaybackActive(true);
+      return;
+    }
+
+    // Multi-fragment: find which fragment this segment belongs to.
+    // Each fragment has a createdAt timestamp. A segment belongs to the fragment
+    // whose createdAt is closest but not after the segment's absolute_start_time.
+    let targetFragmentIndex = 0;
+    if (absoluteStartTime) {
+      const segTime = new Date(absoluteStartTime).getTime();
+      for (let i = recordingFragments.length - 1; i >= 0; i--) {
+        const fragTime = new Date(recordingFragments[i].createdAt).getTime();
+        if (fragTime <= segTime) {
+          targetFragmentIndex = i;
+          break;
+        }
+      }
+    }
+
+    // Seek to the segment's relative start_time within the matched fragment
+    audioPlayerRef.current?.seekToFragment(targetFragmentIndex, startTimeSeconds);
+
+    // Compute virtual time for playback highlighting
+    const virtualOffset = recordingFragments
+      .slice(0, targetFragmentIndex)
+      .reduce((sum, f) => sum + (f.duration || 0), 0);
+    setPlaybackTime(virtualOffset + startTimeSeconds);
+    setIsPlaybackActive(true);
+  }, [hasRecordingAudio, recordingFragments]);
+
+  useEffect(() => {
+    if (!hasRecordingAudio || pendingSeekTime == null) return;
+    const timer = setTimeout(() => {
+      audioPlayerRef.current?.seekTo(pendingSeekTime);
+      setPlaybackTime(pendingSeekTime);
+      setIsPlaybackActive(true);
+      setPendingSeekTime(null);
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [hasRecordingAudio, pendingSeekTime]);
+
   // Track if initial load is complete to prevent animation replays
   const hasLoadedRef = useRef(false);
 
   // Handle meeting status change from WebSocket
   const handleStatusChange = useCallback((status: MeetingStatus) => {
-    // If meeting ended, refresh to get final data
-    if (status === "completed" || status === "failed") {
+    // Refetch when status changes so we get latest data and post-meeting artifacts.
+    if (status === "active" || status === "stopping" || status === "completed" || status === "failed") {
       fetchMeeting(meetingId);
     }
-  }, [fetchMeeting, meetingId]);
+    if (
+      (status === "stopping" || status === "completed") &&
+      currentMeeting?.platform &&
+      currentMeeting?.platform_specific_id
+    ) {
+      fetchTranscripts(currentMeeting.platform, currentMeeting.platform_specific_id);
+    }
+  }, [fetchMeeting, fetchTranscripts, meetingId, currentMeeting?.platform, currentMeeting?.platform_specific_id]);
 
   // Handle stopping the bot
   const handleStopBot = useCallback(async () => {
@@ -151,6 +264,10 @@ export default function MeetingDetailPage() {
     setIsStoppingBot(true);
     try {
       await vexaAPI.stopBot(currentMeeting.platform, currentMeeting.platform_specific_id);
+      // Optimistic transition to post-meeting UI immediately after stop is accepted.
+      setForcePostMeetingMode(true);
+      updateMeetingStatus(String(currentMeeting.id), "stopping");
+      fetchTranscripts(currentMeeting.platform, currentMeeting.platform_specific_id);
       toast.success("Bot stopped", {
         description: "The transcription has been stopped.",
       });
@@ -162,7 +279,7 @@ export default function MeetingDetailPage() {
     } finally {
       setIsStoppingBot(false);
     }
-  }, [currentMeeting, fetchMeeting, meetingId]);
+  }, [currentMeeting, fetchMeeting, fetchTranscripts, meetingId, updateMeetingStatus]);
 
   // Handle language change
   const handleLanguageChange = useCallback(async (newLanguage: string) => {
@@ -186,6 +303,26 @@ export default function MeetingDetailPage() {
       setIsUpdatingConfig(false);
     }
   }, [currentMeeting, updateMeetingData]);
+
+  const handleDeleteMeeting = useCallback(async () => {
+    if (!currentMeeting) return;
+    setIsDeletingMeeting(true);
+    try {
+      await deleteMeeting(
+        currentMeeting.platform,
+        currentMeeting.platform_specific_id,
+        currentMeeting.id
+      );
+      toast.success("Meeting deleted");
+      router.push("/meetings");
+    } catch (error) {
+      toast.error("Failed to delete meeting", {
+        description: (error as Error).message,
+      });
+    } finally {
+      setIsDeletingMeeting(false);
+    }
+  }, [currentMeeting, deleteMeeting, router]);
 
   // Handle export
   const handleExport = useCallback((format: "txt" | "json" | "srt" | "vtt") => {
@@ -354,10 +491,13 @@ export default function MeetingDetailPage() {
   }, [editedChatgptPrompt, chatgptPrompt]);
 
   // Live transcripts and status updates via WebSocket (for active and early states)
-  const isEarlyState = currentMeeting?.status === "requested" || 
-                       currentMeeting?.status === "joining" || 
-                       currentMeeting?.status === "awaiting_admission";
-  const shouldUseWebSocket = currentMeeting?.status === "active" || isEarlyState;
+  const isEarlyState =
+    currentMeeting?.status === "requested" ||
+    currentMeeting?.status === "joining" ||
+    currentMeeting?.status === "awaiting_admission";
+  const isStoppingState = currentMeeting?.status === "stopping";
+  const shouldUseWebSocket =
+    currentMeeting?.status === "active" || isEarlyState || isStoppingState;
   
   const {
     isConnecting: wsConnecting,
@@ -374,6 +514,7 @@ export default function MeetingDetailPage() {
 
   useEffect(() => {
     if (meetingId) {
+      setForcePostMeetingMode(false);
       fetchMeeting(meetingId);
     }
 
@@ -390,13 +531,24 @@ export default function MeetingDetailPage() {
     }
   }, [currentMeeting]);
 
-  // Update config state when meeting data changes
+  // Show detected language from backend first (meeting.data.languages or from segments), then user can change via toggle
+  const validLangCodes = useMemo(
+    () => new Set(WHISPER_LANGUAGE_CODES),
+    []
+  );
   useEffect(() => {
-    if (currentMeeting) {
-      const lang = currentMeeting.data?.languages?.[0] || "auto";
-      setCurrentLanguage(lang);
+    if (!currentMeeting) return;
+    const fromData = currentMeeting.data?.languages?.[0];
+    if (fromData && fromData !== "auto") {
+      setCurrentLanguage(fromData);
+      return;
     }
-  }, [currentMeeting]);
+    // When not set by backend, use first detected language from segments (backend returns it per segment)
+    const fromSegment = transcripts.find(
+      (t) => t.language && t.language !== "unknown" && validLangCodes.has(t.language)
+    )?.language;
+    setCurrentLanguage(fromSegment || "auto");
+  }, [currentMeeting, transcripts, validLangCodes]);
 
   // No longer need polling - WebSocket handles status updates for early states
   // Removed auto-refresh polling since WebSocket provides real-time updates
@@ -405,14 +557,29 @@ export default function MeetingDetailPage() {
   // Use specific properties as dependencies to avoid unnecessary refetches
   const meetingPlatform = currentMeeting?.platform;
   const meetingNativeId = currentMeeting?.platform_specific_id;
+  const meetingStatus = currentMeeting?.status;
 
   useEffect(() => {
-    // When WS is active, `useLiveTranscripts` already bootstraps from REST and then streams deltas.
-    // Fetching again here can race with WS upserts and cause occasional duplicate rendering.
+    // Always refresh transcript/recording artifacts when entering post-meeting flow.
+    if ((meetingStatus === "stopping" || meetingStatus === "completed") && meetingPlatform && meetingNativeId) {
+      fetchTranscripts(meetingPlatform, meetingNativeId);
+      fetchChatMessages(meetingPlatform, meetingNativeId);
+      return;
+    }
+
+    // During non-WS states, use REST fetch as source of truth.
     if (!shouldUseWebSocket && meetingPlatform && meetingNativeId) {
       fetchTranscripts(meetingPlatform, meetingNativeId);
+      fetchChatMessages(meetingPlatform, meetingNativeId);
     }
-  }, [shouldUseWebSocket, meetingPlatform, meetingNativeId, fetchTranscripts]);
+  }, [meetingStatus, shouldUseWebSocket, meetingPlatform, meetingNativeId, fetchTranscripts, fetchChatMessages]);
+
+  // Also fetch chat messages for active meetings (WS handles real-time, REST bootstraps)
+  useEffect(() => {
+    if (shouldUseWebSocket && meetingPlatform && meetingNativeId) {
+      fetchChatMessages(meetingPlatform, meetingNativeId);
+    }
+  }, [shouldUseWebSocket, meetingPlatform, meetingNativeId, fetchChatMessages]);
 
   // Handle saving notes on blur
   const handleNotesBlur = useCallback(async () => {
@@ -454,6 +621,29 @@ export default function MeetingDetailPage() {
     }
   }, [editedNotes]);
 
+  // Compute absolute playback time for transcript highlight matching.
+  // In multi-fragment mode, we convert the virtual playback time to an ISO
+  // absolute timestamp so the transcript viewer can match against absolute_start_time.
+  const playbackAbsoluteTime = useMemo((): string | null => {
+    if (playbackTime == null || !isPlaybackActive || recordingFragments.length === 0) return null;
+    if (recordingFragments.length === 1) {
+      // Single fragment: absolute time = fragment createdAt + playback time
+      const fragStart = new Date(recordingFragments[0].createdAt).getTime();
+      return new Date(fragStart + playbackTime * 1000).toISOString();
+    }
+    // Multi-fragment: find which fragment the virtual time falls in
+    let remaining = playbackTime;
+    for (let i = 0; i < recordingFragments.length; i++) {
+      const fragDur = recordingFragments[i].duration || 0;
+      if (remaining <= fragDur || i === recordingFragments.length - 1) {
+        const fragStart = new Date(recordingFragments[i].createdAt).getTime();
+        return new Date(fragStart + remaining * 1000).toISOString();
+      }
+      remaining -= fragDur;
+    }
+    return null;
+  }, [playbackTime, isPlaybackActive, recordingFragments]);
+
   if (error) {
     return (
       <div className="space-y-6">
@@ -490,6 +680,35 @@ export default function MeetingDetailPage() {
             60000
         )
       : null;
+  const isPostMeetingFlow =
+    forcePostMeetingMode ||
+    currentMeeting.status === "stopping" || currentMeeting.status === "completed";
+  const recordingExplicitlyDisabled = currentMeeting.data?.recording_enabled === false;
+  const hasRecordingEntries = recordings.length > 0;
+  const noAudioRecordingForMeeting =
+    recordingExplicitlyDisabled ||
+    (currentMeeting.status === "completed" && !hasRecordingEntries);
+  const canUseSegmentPlayback = isPostMeetingFlow && !noAudioRecordingForMeeting;
+  const recordingTopBar = isPostMeetingFlow ? (
+    hasRecordingAudio ? (
+      <AudioPlayer
+        ref={audioPlayerRef}
+        fragments={recordingFragments}
+        onTimeUpdate={handlePlaybackTimeUpdate}
+        onFragmentChange={handleFragmentChange}
+        compact
+      />
+    ) : noAudioRecordingForMeeting ? (
+      <div className="flex items-center gap-2 px-4 py-2 bg-muted/50 rounded-lg border text-sm text-muted-foreground">
+        No audio recording for this meeting.
+      </div>
+    ) : (
+      <div className="flex items-center gap-2 px-4 py-2 bg-muted/50 rounded-lg border text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Recording is processing...
+      </div>
+    )
+  ) : null;
 
   const formatDuration = (minutes: number) => {
     if (minutes < 60) return `${minutes} min`;
@@ -725,6 +944,17 @@ export default function MeetingDetailPage() {
             <DocsLink href="/docs/rest/bots#stop-bot" />
             </div>
           )}
+
+          {/* Decisions panel toggle */}
+          <Button
+            variant={decisionsOpen ? "secondary" : "outline"}
+            size="sm"
+            className="gap-1.5 h-9"
+            onClick={() => setDecisionsOpen((v) => !v)}
+          >
+            <Zap className="h-4 w-4 text-amber-500" />
+            <span className="hidden sm:inline">Decisions</span>
+          </Button>
         </div>
       </div>
 
@@ -836,27 +1066,17 @@ export default function MeetingDetailPage() {
 
               {/* Language Selector - Mobile (only when active) */}
               {currentMeeting.status === "active" && (
-                <Select
-                  value={currentLanguage}
-                  onValueChange={handleLanguageChange}
-                  disabled={isUpdatingConfig}
-                >
-                  <SelectTrigger className="h-7 px-1.5 text-[9px] border-0 bg-transparent hover:bg-muted/50 w-auto shrink-0 ml-0.5 [&>svg:last-child]:hidden">
-                    <span className="text-[9px] font-medium">
-                      {SUPPORTED_LANGUAGES.find(l => l.code === currentLanguage)?.code.toUpperCase() || "AUTO"}
-                    </span>
-                    {isUpdatingConfig && (
-                      <Loader2 className="h-2.5 w-2.5 ml-1 animate-spin" />
-                    )}
-                  </SelectTrigger>
-                  <SelectContent align="end" sideOffset={4}>
-                    {SUPPORTED_LANGUAGES.map((lang) => (
-                      <SelectItem key={lang.code} value={lang.code}>
-                        {lang.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex items-center gap-0.5 shrink-0 ml-0.5">
+                  <LanguagePicker
+                    value={currentLanguage ?? "auto"}
+                    onValueChange={handleLanguageChange}
+                    disabled={isUpdatingConfig}
+                    compact
+                  />
+                  {isUpdatingConfig && (
+                    <Loader2 className="h-2.5 w-2.5 animate-spin" />
+                  )}
+                </div>
               )}
 
               <div className="flex items-center border-l ml-0.5 pl-0.5 gap-0">
@@ -1084,12 +1304,14 @@ export default function MeetingDetailPage() {
             />
           )}
 
-          {/* Show transcript viewer for active/completed */}
+          {/* Keep transcript visible through stopping -> completed transition */}
           {(currentMeeting.status === "active" ||
+            currentMeeting.status === "stopping" ||
             currentMeeting.status === "completed") && (
             <TranscriptViewer
               meeting={currentMeeting}
               segments={transcripts}
+              chatMessages={chatMessages}
               isLoading={isLoadingTranscripts}
               isLive={currentMeeting.status === "active"}
               wsConnecting={wsConnecting}
@@ -1097,6 +1319,11 @@ export default function MeetingDetailPage() {
               wsError={wsError}
               wsReconnectAttempts={reconnectAttempts}
               headerActions={<DocsLink href="/docs/cookbook/get-transcripts" />}
+              topBarContent={recordingTopBar}
+              playbackTime={playbackTime}
+              playbackAbsoluteTime={playbackAbsoluteTime}
+              isPlaybackActive={isPlaybackActive}
+              onSegmentClick={canUseSegmentPlayback ? handleSegmentClick : undefined}
             />
           )}
         </div>
@@ -1117,9 +1344,11 @@ export default function MeetingDetailPage() {
               <div className="flex items-center gap-3">
                 <div className="h-8 w-8 rounded-lg flex items-center justify-center overflow-hidden bg-background">
                   <Image
-                    src={currentMeeting.platform === "google_meet" 
-                      ? "/icons/icons8-google-meet-96.png" 
-                      : "/icons/icons8-teams-96.png"}
+                    src={currentMeeting.platform === "google_meet"
+                      ? "/icons/icons8-google-meet-96.png"
+                      : currentMeeting.platform === "teams"
+                      ? "/icons/icons8-teams-96.png"
+                      : "/icons/icons8-zoom-96.png"}
                     alt={platformConfig.name}
                     width={32}
                     height={32}
@@ -1167,28 +1396,26 @@ export default function MeetingDetailPage() {
                   <div className="space-y-3">
                     <p className="text-sm font-medium">Bot Settings</p>
                     
-                    {/* Language Selection */}
+                    {/* Language Selection - shows detected language from backend first, user can change */}
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
                         <label className="text-xs text-muted-foreground">Language</label>
                         <DocsLink href="/docs/rest/bots#update-bot-configuration" />
                       </div>
-                      <Select
-                        value={currentLanguage}
-                        onValueChange={handleLanguageChange}
-                        disabled={isUpdatingConfig}
-                      >
-                        <SelectTrigger className="h-9">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {SUPPORTED_LANGUAGES.map((lang) => (
-                            <SelectItem key={lang.code} value={lang.code}>
-                              {lang.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        When not set, the service detects the language automatically. You can change it below if needed.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <LanguagePicker
+                          value={currentLanguage ?? "auto"}
+                          onValueChange={handleLanguageChange}
+                          disabled={isUpdatingConfig}
+                          triggerClassName="h-9 w-full justify-between"
+                        />
+                        {isUpdatingConfig && (
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        )}
+                      </div>
                     </div>
 
                     {isUpdatingConfig && (
@@ -1210,7 +1437,7 @@ export default function MeetingDetailPage() {
                     <div>
                       <p className="text-sm font-medium">Languages</p>
                       <p className="text-sm text-muted-foreground">
-                        {currentMeeting.data.languages.join(", ").toUpperCase()}
+                        {currentMeeting.data.languages.map(getLanguageDisplayName).join(", ")}
                       </p>
                     </div>
                   </div>
@@ -1349,7 +1576,99 @@ export default function MeetingDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {(currentMeeting.status === "completed" || currentMeeting.status === "failed") && (
+            <Card className="border-destructive/30">
+              <CardContent className="pt-6">
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      variant="destructive"
+                      className="w-full gap-2"
+                      disabled={isDeletingMeeting}
+                      onClick={() => setDeleteConfirmText("")}
+                    >
+                      {isDeletingMeeting ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                      Delete meeting
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete meeting?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This removes transcript data and anonymizes meeting data. Type <strong>delete</strong> to confirm.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <div className="py-2">
+                      <Input
+                        placeholder='Type "delete" to confirm'
+                        value={deleteConfirmText}
+                        onChange={(e) => setDeleteConfirmText(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleDeleteMeeting}
+                        disabled={deleteConfirmText.trim().toLowerCase() !== "delete" || isDeletingMeeting}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        Delete meeting
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </CardContent>
+            </Card>
+          )}
           </div>
+        </div>
+      </div>
+
+      {/* Decisions slide-over panel */}
+      {/* Backdrop */}
+      {decisionsOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm lg:hidden"
+          onClick={() => setDecisionsOpen(false)}
+        />
+      )}
+      {/* Panel */}
+      <div
+        className={cn(
+          "fixed inset-y-0 right-0 z-50 flex flex-col w-full sm:w-[420px]",
+          "bg-background border-l shadow-2xl",
+          "transform transition-transform duration-300 ease-in-out",
+          decisionsOpen ? "translate-x-0" : "translate-x-full"
+        )}
+      >
+        {/* Panel header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
+          <div className="flex items-center gap-2">
+            <Zap className="h-4 w-4 text-amber-500" />
+            <span className="font-semibold text-sm">Decisions</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={() => setDecisionsOpen(false)}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        {/* Panel content — scrollable */}
+        <div className="flex-1 overflow-y-auto p-4">
+          <DecisionsPanel
+            meetingId={meetingId}
+            isActive={currentMeeting.status === "active"}
+            embedded
+          />
         </div>
       </div>
     </div>

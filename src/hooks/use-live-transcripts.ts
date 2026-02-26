@@ -7,6 +7,7 @@ import type {
   MeetingStatus,
   TranscriptSegment,
   WebSocketSegment,
+  ChatMessage,
 } from "@/types/vexa";
 import { useMeetingsStore } from "@/stores/meetings-store";
 import { vexaAPI } from "@/lib/api";
@@ -68,6 +69,7 @@ export function useLiveTranscripts(
   const bootstrapTranscripts = useMeetingsStore((state) => state.bootstrapTranscripts);
   const upsertTranscriptSegments = useMeetingsStore((state) => state.upsertTranscriptSegments);
   const updateMeetingStatus = useMeetingsStore((state) => state.updateMeetingStatus);
+  const addChatMessage = useMeetingsStore((state) => state.addChatMessage);
 
   // Convert WebSocket segment to TranscriptSegment format
   const convertWebSocketSegment = useCallback(
@@ -157,20 +159,11 @@ export function useLiveTranscripts(
     let wsUrl: string;
     let authToken: string | null = null;
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a89f31ed-bb1b-47a2-9c8c-c03467b63bbc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-live-transcripts.ts:159',message:'Fetching WebSocket config',data:{endpoint:'/api/config'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
       const configResponse = await fetch("/api/config");
       const config = await configResponse.json();
       wsUrl = config.wsUrl;
       authToken = config.authToken;
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a89f31ed-bb1b-47a2-9c8c-c03467b63bbc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-live-transcripts.ts:163',message:'WebSocket config received',data:{wsUrl:wsUrl?.replace(/api_key=[^&]+/,'api_key=***'),hasAuthToken:!!authToken,authTokenLength:authToken?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
-      // #endregion
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a89f31ed-bb1b-47a2-9c8c-c03467b63bbc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-live-transcripts.ts:165',message:'WebSocket config fetch failed',data:{error:(error as Error)?.message||String(error)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-      // #endregion
       // Fallback to default (runtime config should always be available)
       wsUrl = "ws://localhost:18056/ws";
     }
@@ -183,10 +176,6 @@ export function useLiveTranscripts(
       wsUrl = `${wsUrl}${separator}api_key=${encodeURIComponent(authToken)}`;
     }
     console.log("[LiveTranscripts] Connecting to:", wsUrl.replace(/api_key=([^&]+)/, "api_key=***"));
-    
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/a89f31ed-bb1b-47a2-9c8c-c03467b63bbc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-live-transcripts.ts:175',message:'Creating WebSocket connection',data:{wsUrl:wsUrl.replace(/api_key=[^&]+/,'api_key=***'),hasAuthToken:!!authToken,platform,nativeId,meetingId},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -196,9 +185,6 @@ export function useLiveTranscripts(
         if (!mountedRef.current) return;
 
         console.log("[LiveTranscripts] Connected");
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a89f31ed-bb1b-47a2-9c8c-c03467b63bbc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-live-transcripts.ts:181',message:'WebSocket opened',data:{platform,nativeId,meetingId,readyState:ws.readyState},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-        // #endregion
         setIsConnecting(false);
         setIsConnected(true);
         setReconnectAttempts(0);
@@ -210,9 +196,6 @@ export function useLiveTranscripts(
           action: "subscribe",
           meetings: [{ platform, native_id: nativeId }],
         };
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a89f31ed-bb1b-47a2-9c8c-c03467b63bbc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-live-transcripts.ts:193',message:'Sending subscribe message',data:subscribeMessage,timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
         ws.send(JSON.stringify(subscribeMessage));
 
         // Start ping interval for keepalive
@@ -228,9 +211,6 @@ export function useLiveTranscripts(
 
         try {
           const message: WebSocketIncomingMessage = JSON.parse(event.data);
-          // #region agent log
-          fetch('http://127.0.0.1:7242/ingest/a89f31ed-bb1b-47a2-9c8c-c03467b63bbc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-live-transcripts.ts:207',message:'WebSocket message received',data:{type:message.type,hasSegments:!!(message as any).payload?.segments,segmentCount:(message as any).payload?.segments?.length||0},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'G'})}).catch(()=>{});
-          // #endregion
 
           switch (message.type) {
             case "transcript.mutable":
@@ -249,17 +229,20 @@ export function useLiveTranscripts(
 
                 if (segments.length > 0) {
                   upsertTranscriptSegments(segments);
-                  // #region agent log
-                  try {
-                    const uids = Array.from(new Set(segments.map((s) => s.session_uid).filter(Boolean)));
-                    const unknownCount = segments.reduce((acc, s) => acc + (s.speaker === "Unknown" ? 1 : 0), 0);
-                    fetch('http://127.0.0.1:7242/ingest/a89f31ed-bb1b-47a2-9c8c-c03467b63bbc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-live-transcripts.ts:250',message:'Segments processed (speaker/uid stats)',data:{segmentCount:segments.length,unknownSpeakerCount:unknownCount,uniqueSessionUidPrefixes:uids.map((u)=>u.slice(0,8)),platform,nativeId,meetingId},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'S1'})}).catch(()=>{});
-                  } catch {}
-                  // #endregion
                   console.log(
                     `[LiveTranscripts] ${message.type}: ${segments.length} segments processed`
                   );
                 }
+              }
+              break;
+
+            case "chat.new_message":
+              // Real-time chat message from the bot
+              if (message.payload) {
+                addChatMessage(message.payload as ChatMessage);
+                console.log(
+                  `[LiveTranscripts] chat.new_message: ${(message.payload as ChatMessage).sender}`
+                );
               }
               break;
 
@@ -321,11 +304,7 @@ export function useLiveTranscripts(
           // Empty error event - just log state, actual error will be in onclose
           console.warn("[LiveTranscripts] WebSocket error event (details will be in onclose):", errorInfo);
         }
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a89f31ed-bb1b-47a2-9c8c-c03467b63bbc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-live-transcripts.ts:299',message:'WebSocket error event',data:{...errorInfo,hasErrorDetails:!!hasErrorDetails,errorMessage:(event as any).error?.message||(event as any).message||null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'H'})}).catch(()=>{});
-        // #endregion
-        
+
         if (!mountedRef.current) return;
         // Don't set connection error here - wait for onclose which has actual error codes
         // setConnectionError will be set in onclose with more details
@@ -351,10 +330,7 @@ export function useLiveTranscripts(
           console.warn("[LiveTranscripts] Connection closed with error:", closeInfo);
           setConnectionError(errorMessage);
         }
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/a89f31ed-bb1b-47a2-9c8c-c03467b63bbc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-live-transcripts.ts:308',message:'WebSocket closed',data:closeInfo,timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'I'})}).catch(()=>{});
-        // #endregion
+
         setIsConnecting(false);
         setIsConnected(false);
 
@@ -387,9 +363,6 @@ export function useLiveTranscripts(
       };
     } catch (error) {
       console.error("[LiveTranscripts] Failed to create WebSocket:", error);
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/a89f31ed-bb1b-47a2-9c8c-c03467b63bbc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-live-transcripts.ts:311',message:'WebSocket creation failed',data:{error:(error as Error)?.message||String(error),errorName:(error as Error)?.name||'Unknown',stack:(error as Error)?.stack?.substring(0,200)||null},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'J'})}).catch(()=>{});
-      // #endregion
       if (!mountedRef.current) return;
 
       setIsConnecting(false);
@@ -402,6 +375,7 @@ export function useLiveTranscripts(
     convertWebSocketSegment,
     upsertTranscriptSegments,
     updateMeetingStatus,
+    addChatMessage,
     getReconnectDelay,
     cleanup,
   ]);

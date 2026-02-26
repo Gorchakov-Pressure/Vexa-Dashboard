@@ -27,10 +27,20 @@ async function proxyRequest(
     headers["X-API-Key"] = VEXA_API_KEY;
   }
 
+  // Forward Range header for audio/video seeking support
+  const rangeHeader = request.headers.get("range");
+  if (rangeHeader) {
+    headers["Range"] = rangeHeader;
+  }
+
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
     const fetchOptions: RequestInit = {
       method,
       headers,
+      signal: controller.signal,
     };
 
     if (method !== "GET" && method !== "HEAD") {
@@ -41,6 +51,7 @@ async function proxyRequest(
     }
 
     const response = await fetch(url, fetchOptions);
+    clearTimeout(timeoutId);
 
     // Handle empty responses
     const contentType = response.headers.get("content-type") || "";
@@ -48,29 +59,45 @@ async function proxyRequest(
       return new NextResponse(null, { status: response.status });
     }
 
-    // Prefer JSON passthrough when possible, but do not drop non-JSON error bodies
-    const text = await response.text();
-    if (contentType.includes("application/json") && text) {
-      try {
-        const data = JSON.parse(text);
-        return NextResponse.json(data, { status: response.status });
-      } catch {
-        // fall through to plain text passthrough
+    // Stream binary responses (audio, video, octet-stream) directly
+    if (!contentType.includes("application/json")) {
+      const responseHeaders = new Headers();
+      // Forward relevant headers for media streaming
+      for (const key of ["content-type", "content-length", "content-disposition",
+        "accept-ranges", "content-range"]) {
+        const value = response.headers.get(key);
+        if (value) responseHeaders.set(key, value);
       }
+      return new NextResponse(response.body, {
+        status: response.status,
+        headers: responseHeaders,
+      });
     }
 
-    // If upstream sent non-JSON (or invalid JSON), pass through raw text and content-type
-    return new NextResponse(text || null, {
-      status: response.status,
-      headers: {
-        "Content-Type": contentType || "text/plain; charset=utf-8",
-      },
-    });
+    // Parse JSON defensively: backend may occasionally send malformed JSON with JSON content-type
+    const text = await response.text();
+    if (!text) {
+      return new NextResponse(null, { status: response.status });
+    }
+
+    try {
+      const data = JSON.parse(text);
+      return NextResponse.json(data, { status: response.status });
+    } catch {
+      return new NextResponse(text, {
+        status: response.status,
+        headers: {
+          "Content-Type": contentType || "application/json; charset=utf-8",
+        },
+      });
+    }
   } catch (error) {
-    console.error(`Proxy error for ${method} ${url}:`, error);
+    const isTimeout = error instanceof DOMException && error.name === "AbortError";
+    console.error(`Proxy ${isTimeout ? "timeout" : "error"} for ${method} ${url}:`, error);
     return NextResponse.json(
-      { error: "Failed to connect to Vexa API", details: (error as Error).message },
-      { status: 502 }
+      { error: isTimeout ? "Backend request timed out" : "Failed to connect to Vexa API",
+        details: (error as Error).message },
+      { status: isTimeout ? 504 : 502 }
     );
   }
 }

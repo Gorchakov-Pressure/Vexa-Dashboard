@@ -13,13 +13,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "sonner";
 import { vexaAPI } from "@/lib/api";
 import { useLiveStore } from "@/stores/live-store";
@@ -28,12 +21,14 @@ import { useMeetingsStore } from "@/stores/meetings-store";
 import { useRuntimeConfig } from "@/hooks/use-runtime-config";
 import { useUserBotDefaults } from "@/hooks/use-user-bot-defaults";
 import type { Platform, CreateBotRequest } from "@/types/vexa";
-import { SUPPORTED_LANGUAGES } from "@/types/vexa";
+import { LanguagePicker } from "@/components/language-picker";
 import { cn } from "@/lib/utils";
 import { getUserFriendlyError } from "@/lib/error-messages";
 import { DocsLink } from "@/components/docs/docs-link";
+import { useAuthStore } from "@/stores/auth-store";
+import { shouldTriggerZoomOAuth, startZoomOAuth } from "@/lib/zoom-oauth-client";
 
-// Parse Google Meet or Teams URL/meeting ID
+// Parse Google Meet, Zoom, or Teams URL/meeting ID
 function parseMeetingInput(
   input: string
 ): { platform: Platform; meetingId: string; passcode?: string; requiresPasscode?: boolean } | null {
@@ -42,22 +37,20 @@ function parseMeetingInput(
 
   // Prefer URL parsing when possible (preserves query params like Teams `context=...`)
   try {
-    const url = new URL(trimmed.startsWith("http://") || trimmed.startsWith("https://") ? trimmed : `https://${trimmed}`);
+    const url = new URL(
+      trimmed.startsWith("http://") || trimmed.startsWith("https://") ? trimmed : `https://${trimmed}`
+    );
     const host = url.hostname.toLowerCase();
 
     // Microsoft Teams (enterprise) meetup-join links
-    // Example:
-    // https://teams.microsoft.com/l/meetup-join/<native_id>?context=...
     if (host.endsWith("teams.microsoft.com")) {
       if (url.pathname.toLowerCase().startsWith("/l/meetup-join/")) {
-        // Keep the full URL (including ?context=...) — backend will normalize to teams_<hash>
+        // Keep full URL (including ?context=...) — backend normalizes this safely
         return { platform: "teams", meetingId: url.toString(), requiresPasscode: false };
       }
     }
 
-    // Microsoft Teams (consumer) links
-    // Example:
-    // https://teams.live.com/meet/<numeric_id>?p=<passcode>
+    // Microsoft Teams (consumer) links: https://teams.live.com/meet/<id>?p=<passcode>
     if (host.endsWith("teams.live.com")) {
       const meetPrefix = "/meet/";
       if (url.pathname.toLowerCase().startsWith(meetPrefix)) {
@@ -69,7 +62,6 @@ function parseMeetingInput(
   } catch {
     // Fall back to regex parsing below
   }
-
   // Google Meet URL patterns
   // https://meet.google.com/abc-defg-hij
   // meet.google.com/abc-defg-hij
@@ -110,8 +102,24 @@ function parseMeetingInput(
     return { platform: "teams", meetingId, passcode, requiresPasscode: false };
   }
 
-  // Teams meeting ID (numeric or alphanumeric with specific patterns)
-  if (/^\d{9,}$/.test(trimmed)) {
+  // Zoom URL patterns
+  // https://zoom.us/j/85173157171?pwd=xxx
+  // https://us05web.zoom.us/j/85173157171?pwd=xxx
+  const zoomUrlRegex = /(?:https?:\/\/)?(?:[\w-]+\.)?zoom\.us\/j\/(\d+)/i;
+  const zoomMatch = trimmed.match(zoomUrlRegex);
+  if (zoomMatch) {
+    const passcodeMatch = trimmed.match(/[?&]pwd=([^&]+)/i);
+    const passcode = passcodeMatch ? decodeURIComponent(passcodeMatch[1]) : undefined;
+    return { platform: "zoom", meetingId: zoomMatch[1], passcode };
+  }
+
+  // Zoom meeting ID (9-11 digits)
+  if (/^\d{9,11}$/.test(trimmed)) {
+    return { platform: "zoom", meetingId: trimmed };
+  }
+
+  // Teams meeting ID (longer numeric strings)
+  if (/^\d{12,}$/.test(trimmed)) {
     return { platform: "teams", meetingId: trimmed, requiresPasscode: false };
   }
 
@@ -130,14 +138,6 @@ function parseMeetingInput(
   return null;
 }
 
-// Get browser language code
-function getBrowserLanguage(): string {
-  if (typeof window === "undefined") return "auto";
-
-  const browserLang = navigator.language.split("-")[0].toLowerCase();
-  const supported = SUPPORTED_LANGUAGES.find((l) => l.code === browserLang);
-  return supported ? browserLang : "auto";
-}
 
 export function JoinModal() {
   const router = useRouter();
@@ -146,6 +146,7 @@ export function JoinModal() {
   const { setCurrentMeeting } = useMeetingsStore();
   const { config } = useRuntimeConfig();
   const { defaults: userDefaults } = useUserBotDefaults();
+  const user = useAuthStore((state) => state.user);
 
   const [meetingInput, setMeetingInput] = useState("");
   const [platform, setPlatform] = useState<Platform>("google_meet");
@@ -157,10 +158,8 @@ export function JoinModal() {
   const [languageTouched, setLanguageTouched] = useState(false);
   const [botNameTouched, setBotNameTouched] = useState(false);
 
-  // Set default language on mount
-  useEffect(() => {
-    setLanguage(getBrowserLanguage());
-  }, []);
+  // Default is "auto" so we don't send a language and the transcription service can auto-detect.
+  // (Previously we set getBrowserLanguage() here, which sent e.g. "en" and skipped detection.)
 
   // Apply user defaults (do not override explicit user choice)
   useEffect(() => {
@@ -210,57 +209,51 @@ export function JoinModal() {
 
     if (!parsedInput) {
       toast.error("Invalid meeting", {
-        description: "Please enter a Google Meet URL/code or a Microsoft Teams meetup link / Meeting ID",
+        description: "Please enter a valid Google Meet, Zoom, or Teams URL or meeting code",
       });
       return;
     }
 
     // Validate Teams passcode requirement and prepare final passcode
-    let finalPasscode: string | undefined;
-    if (parsedInput.platform === "teams") {
-      // Use passcode from parsedInput (URL) if available, otherwise use manually entered passcode
-      finalPasscode = parsedInput.passcode || passcode.trim();
-    }
-
-    if (parsedInput.platform === "teams" && finalPasscode) {
-      if (!/^[A-Za-z0-9]{8,20}$/.test(finalPasscode)) {
-        toast.error("Неверный passcode", {
-          description: "Для Teams passcode должен быть 8–20 символов (только латиница и цифры).",
-        });
-        return;
-      }
+    // Use passcode from parsed URL first, then fall back to manually entered passcode
+    const finalPasscode = parsedInput.passcode || passcode.trim() || undefined;
+    if (parsedInput.platform === "teams" && finalPasscode && !/^[A-Za-z0-9]{8,20}$/.test(finalPasscode)) {
+      toast.error("Неверный passcode", {
+        description: "Для Teams passcode должен быть 8–20 символов (только латиница и цифры).",
+      });
+      return;
     }
 
     setIsSubmitting(true);
 
-    try {
-      const request: CreateBotRequest = {
+    const request: CreateBotRequest = {
         platform: parsedInput.platform,
         native_meeting_id: parsedInput.meetingId,
       };
 
-      // Add passcode for Teams meetings
-      if (parsedInput.platform === "teams" && finalPasscode) {
-        request.passcode = finalPasscode;
-      }
+    // Add passcode for Teams and Zoom meetings
+    if ((parsedInput.platform === "teams" || parsedInput.platform === "zoom") && finalPasscode) {
+      request.passcode = finalPasscode;
+    }
 
-      // Set bot name - use custom name or configured default
-      request.bot_name =
-        botName.trim() ||
-        userDefaults?.bot_name ||
-        config?.defaultBotName ||
-        "Vexa - Open Source Bot";
+    // Set bot name - use custom name or configured default
+    request.bot_name =
+      botName.trim() ||
+      userDefaults?.bot_name ||
+      config?.defaultBotName ||
+      "Vexa - Open Source Bot";
 
-      if (language && language !== "auto") {
-        request.language = language;
-      } else if (userDefaults?.language && userDefaults.language !== "auto") {
-        request.language = userDefaults.language;
-      }
+    if (language && language !== "auto") {
+      request.language = language;
+    } else if (userDefaults?.language && userDefaults.language !== "auto") {
+      request.language = userDefaults.language;
+    }
 
-      if (userDefaults?.task) {
-        request.task = userDefaults.task;
-      }
+    if (userDefaults?.task) {
+      request.task = userDefaults.task;
+    }
 
+    try {
       const meeting = await vexaAPI.createBot(request);
 
       toast.success("Bot joining meeting", {
@@ -276,12 +269,36 @@ export function JoinModal() {
       router.push(`/meetings/${meeting.id}`);
     } catch (error) {
       console.error("Failed to create bot:", error);
+
+      if (
+        shouldTriggerZoomOAuth(error, request.platform) &&
+        request.platform === "zoom" &&
+        user?.email
+      ) {
+        try {
+          toast.info("Zoom authentication required", {
+            description:
+              "Redirecting to Zoom. Sign in with the Zoom account that owns or is allowed to use the Vexa app to avoid \"Application not found\".",
+          });
+          await startZoomOAuth({
+            userEmail: user.email,
+            pendingRequest: request,
+            returnTo: "/meetings",
+          });
+          return;
+        } catch (oauthError) {
+          toast.error("Failed to start Zoom authentication", {
+            description: (oauthError as Error).message,
+          });
+        }
+      }
+
       const { title, description } = getUserFriendlyError(error as Error);
       toast.error(title, { description });
     } finally {
       setIsSubmitting(false);
     }
-  }, [parsedInput, passcode, botName, language, config, userDefaults, setActiveMeeting, setCurrentMeeting, closeModal, router]);
+  }, [parsedInput, passcode, botName, language, config, userDefaults, setActiveMeeting, setCurrentMeeting, closeModal, router, user]);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && closeModal()}>
@@ -294,7 +311,7 @@ export function JoinModal() {
             Join a Meeting
           </DialogTitle>
           <DialogDescription>
-            Paste a Google Meet or Teams URL to start transcribing automatically
+            Paste a Google Meet, Zoom, or Teams URL to start transcribing automatically
           </DialogDescription>
         </DialogHeader>
 
@@ -314,6 +331,10 @@ export function JoinModal() {
                         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
                       </svg>
                     </div>
+                  ) : parsedInput.platform === "zoom" ? (
+                    <div className="h-6 w-6 rounded-md bg-blue-500 flex items-center justify-center shadow-sm">
+                      <Video className="h-4 w-4 text-white" />
+                    </div>
                   ) : (
                     <div className="h-6 w-6 rounded-md bg-[#5059C9] flex items-center justify-center shadow-sm">
                       <svg className="h-4 w-4 text-white" viewBox="0 0 24 24" fill="currentColor">
@@ -325,7 +346,7 @@ export function JoinModal() {
               )}
               <Input
                 id="meetingInput"
-                placeholder="Paste meeting URL (Google Meet or Teams)..."
+                placeholder="Paste meeting URL (Google Meet, Zoom, or Teams)..."
                 value={meetingInput}
                 onChange={(e) => setMeetingInput(e.target.value)}
                 className={cn(
@@ -335,6 +356,8 @@ export function JoinModal() {
                     isValid
                       ? parsedInput?.platform === "google_meet"
                         ? "border-green-500 focus-visible:ring-green-500/20"
+                        : parsedInput?.platform === "zoom"
+                        ? "border-blue-500 focus-visible:ring-blue-500/20"
                         : "border-[#5059C9] focus-visible:ring-[#5059C9]/20"
                       : "border-orange-500 focus-visible:ring-orange-500/20"
                   )
@@ -347,11 +370,19 @@ export function JoinModal() {
                 <div className="absolute right-3 top-1/2 -translate-y-1/2">
                   <div className={cn(
                     "h-6 w-6 rounded-full flex items-center justify-center animate-fade-in",
-                    parsedInput?.platform === "google_meet" ? "bg-green-100 dark:bg-green-950" : "bg-blue-100 dark:bg-blue-950"
+                    parsedInput?.platform === "google_meet"
+                      ? "bg-green-100 dark:bg-green-950"
+                      : parsedInput?.platform === "zoom"
+                      ? "bg-blue-100 dark:bg-blue-950"
+                      : "bg-indigo-100 dark:bg-indigo-950"
                   )}>
                     <svg className={cn(
                       "h-4 w-4",
-                      parsedInput?.platform === "google_meet" ? "text-green-600 dark:text-green-400" : "text-[#5059C9]"
+                      parsedInput?.platform === "google_meet"
+                        ? "text-green-600 dark:text-green-400"
+                        : parsedInput?.platform === "zoom"
+                        ? "text-blue-600 dark:text-blue-400"
+                        : "text-[#5059C9]"
                     )} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                       <polyline points="20 6 9 17 4 12" />
                     </svg>
@@ -367,18 +398,22 @@ export function JoinModal() {
                   "inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium",
                   parsedInput.platform === "google_meet"
                     ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300"
-                    : "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                    : parsedInput.platform === "zoom"
+                    ? "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"
+                    : "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
                 )}>
                   {parsedInput.platform === "google_meet" ? (
                     <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
                     </svg>
+                  ) : parsedInput.platform === "zoom" ? (
+                    <Video className="h-3 w-3" />
                   ) : (
                     <svg className="h-3 w-3" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M19.98 7.89A2.14 2.14 0 1 0 17.84 10V7.89h2.14zm-5.27 0A2.14 2.14 0 1 0 12.58 10V7.89h2.13zM12.58 14.5h-1.11v-1.8h1.11zm4.13 0h-1.11v-1.8h1.11zM21 11.36v5.5a3 3 0 0 1-3 3h-3.86v-4.5H12.5v4.5H8.64v-4.5h-1.78a3 3 0 0 1-3-3v-5.5a3 3 0 0 1 3-3h11.14a3 3 0 0 1 3 3z"/>
                     </svg>
                   )}
-                  {parsedInput.platform === "google_meet" ? "Google Meet" : "Microsoft Teams"}
+                  {parsedInput.platform === "google_meet" ? "Google Meet" : parsedInput.platform === "zoom" ? "Zoom" : "Microsoft Teams"}
                 </span>
                 <span className="font-mono text-xs bg-muted px-2 py-1 rounded-md truncate max-w-[200px]">
                   {parsedInput.meetingId}
@@ -387,24 +422,22 @@ export function JoinModal() {
             )}
           </div>
 
-          {/* Language Selection */}
+          {/* Language Selection - backend detects language if not set; user can change from meeting page */}
           <div className="space-y-2">
             <Label htmlFor="language" className="text-sm flex items-center gap-2">
               <Globe className="h-3.5 w-3.5" />
               Transcription Language
             </Label>
-            <Select value={language} onValueChange={(v) => { setLanguageTouched(true); setLanguage(v); }}>
-              <SelectTrigger id="language" className="h-10">
-                <SelectValue placeholder="Select language" />
-              </SelectTrigger>
-              <SelectContent>
-                {SUPPORTED_LANGUAGES.map((lang) => (
-                  <SelectItem key={lang.code} value={lang.code}>
-                    {lang.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <LanguagePicker
+              value={language}
+              onValueChange={(value) => { setLanguageTouched(true); setLanguage(value); }}
+              triggerClassName="h-10 w-full justify-between"
+            />
+            {language === "auto" && (
+              <p className="text-xs text-muted-foreground">
+                Auto-detect: the service will detect the language when the meeting starts. You can change it anytime from the meeting page.
+              </p>
+            )}
           </div>
 
           {/* Advanced Options Toggle */}
@@ -437,8 +470,8 @@ export function JoinModal() {
                 />
               </div>
 
-              {/* Passcode for Teams */}
-              {platform === "teams" && (
+              {/* Passcode for Teams and Zoom */}
+              {(platform === "teams" || platform === "zoom") && (
                 <div className="space-y-2">
                   <Label htmlFor="passcode" className="text-sm">
                     Passcode (optional)

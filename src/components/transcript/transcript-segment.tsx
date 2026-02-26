@@ -2,6 +2,7 @@
 
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Play } from "lucide-react";
 import type { TranscriptSegment as TranscriptSegmentType, SpeakerColor } from "@/types/vexa";
 
 interface TranscriptSegmentProps {
@@ -10,6 +11,8 @@ interface TranscriptSegmentProps {
   isHighlighted?: boolean;
   searchQuery?: string;
   appendedText?: string | null;
+  isActivePlayback?: boolean;
+  onClickSegment?: () => void;
 }
 
 function formatTimestamp(seconds: number): string {
@@ -101,6 +104,8 @@ export function TranscriptSegment({
   isHighlighted,
   searchQuery,
   appendedText,
+  isActivePlayback,
+  onClickSegment,
 }: TranscriptSegmentProps) {
   // Always display absolute time from the feed when available (device-independent).
   // For grouped segments, callers should pass the FIRST segment's `absolute_start_time` as `segment.absolute_start_time`.
@@ -110,10 +115,13 @@ export function TranscriptSegment({
 
   return (
     <div
+      onClick={onClickSegment}
       className={cn(
         "group flex gap-3 p-3 rounded-lg transition-colors",
         isHighlighted && "bg-yellow-50 dark:bg-yellow-900/20",
-        !isHighlighted && "hover:bg-muted/50"
+        isActivePlayback && "bg-primary/10 border-l-2 border-primary",
+        !isHighlighted && !isActivePlayback && "hover:bg-muted/50",
+        onClickSegment && "cursor-pointer"
       )}
     >
       {/* Avatar */}
@@ -132,6 +140,21 @@ export function TranscriptSegment({
           <span className="text-xs text-muted-foreground">
             {displayTimestamp}
           </span>
+          {onClickSegment && (
+            <span
+              className={cn(
+                "ml-auto inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground transition-all",
+                isActivePlayback
+                  ? "opacity-100 border-primary/40 bg-primary/10 text-primary"
+                  : "opacity-80 group-hover:opacity-100 group-hover:border-primary/40 group-hover:bg-primary/10 group-hover:text-primary"
+              )}
+              aria-label="Click segment to play from this timestamp"
+              title="Click to play from this segment"
+            >
+              <Play className="h-3 w-3" />
+              Play
+            </span>
+          )}
         </div>
         <p className="text-sm leading-relaxed">
           {renderTextWithAppendedHighlight(segment.text, appendedText || null, searchQuery)}
