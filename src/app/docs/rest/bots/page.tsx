@@ -31,6 +31,7 @@ export default function BotsPage() {
             platform: "google_meet",
             native_meeting_id: "abc-defg-hij",
             passcode: "optional_passcode",
+            meeting_url: "https://meet.google.com/abc-defg-hij",
             bot_name: "Vexa Transcription Bot",
             language: "en",
             task: "transcribe",
@@ -69,6 +70,7 @@ export default function BotsPage() {
           "For Google Meet, meeting IDs follow the format: abc-defg-hij",
           "For Microsoft Teams, you can provide either a numeric Meeting ID or a meetup-join URL (teams.microsoft.com/l/meetup-join/...)",
           "Passcode is optional for Teams. If the meeting prompts for a passcode and you provide it, the bot will use it; otherwise it will wait for lobby approval",
+          "Always pass meeting_url for Teams to preserve the exact domain",
           "When you provide a Teams meetup-join URL, the API will return a normalized native_meeting_id (e.g. teams_<hash>) for URL-safe routing",
           "The language parameter is optional. If not specified, the bot will auto-detect the language",
         ]}
